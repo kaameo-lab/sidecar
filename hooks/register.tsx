@@ -1,0 +1,489 @@
+import { atom, read, update } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
+
+import type { Entry, Folded, Item, Stats, Summary, View } from '../types'
+import {
+  baseName,
+  clockTime,
+  fallbackGist,
+  gistPrompt,
+  parseGist,
+  parseSummary,
+  promptLine,
+  span,
+  summaryPrompt,
+} from './digest'
+import { layout } from './diagram'
+import { parseChoices, parseQuestions } from './parse'
+import { fit } from './width'
+
+const EMPTY_VIEW: View = {
+  phase: 'none',
+  question: '',
+  choices: [],
+  items: [],
+  answers: {},
+  editing: '',
+  sent: '',
+  draft: '',
+}
+const NO_ENTRIES: Entry[] = []
+const EMPTY_SUMMARY: Summary = {
+  goal: '',
+  decisions: [],
+  open: [],
+  nodes: [],
+  edges: [],
+  at: 0,
+  isBusy: false,
+  error: '',
+}
+const EMPTY_STATS: Stats = { startedAt: 0, turns: 0, sinceSummary: 0, files: [] }
+const EMPTY_FOLDED: Folded = { choices: false, summary: false, diagram: false, log: false, open: '' }
+
+// Change a tag when its type's fields change: it declines what an earlier
+// version stored, which outlives a reload.
+const view = atom({ plugin: 'sidecar', key: 'view' } as const, EMPTY_VIEW, { shape: 'view-3' })
+const log = atom({ plugin: 'sidecar', key: 'log' } as const, NO_ENTRIES, { shape: 'log-1' })
+const summary = atom({ plugin: 'sidecar', key: 'summary' } as const, EMPTY_SUMMARY, { shape: 'summary-2' })
+const stats = atom({ plugin: 'sidecar', key: 'stats' } as const, EMPTY_STATS, { shape: 'stats-1' })
+const folded = atom({ plugin: 'sidecar', key: 'folded' } as const, EMPTY_FOLDED, { shape: 'folded-2' })
+
+const PLUGIN = 'sidecar'
+const PANE = 'sidecar'
+const TITLE = '대화'
+const RECOMMEND = '추천대로'
+const SUMMARY_EVERY = 5
+const LOG_KEPT = 200
+const LOG_SHOWN = 30
+
+// The last answer of the main loop: a fork's transcript ends before it.
+let lastAnswer = ''
+
+// The answer "as recommended" sends: the option the suggestion names, else
+// the suggestion itself.
+const recommended = (item: Item) => {
+  const named = item.choices.find(choice => choice.key === item.pick)
+
+  return named ? `${named.key}) ${named.label}` : `${RECOMMEND} (${item.suggestion})`
+}
+
+// One line per answered question; with `fillRest`, the unanswered ones that
+// carry a suggestion take it.
+const compose = (v: View, fillRest: boolean) =>
+  v.items
+    .flatMap(item => {
+      const given = v.answers[item.id] ?? (fillRest && item.suggestion !== '' ? recommended(item) : undefined)
+
+      return given === undefined ? [] : [`${item.id}: ${given}`]
+    })
+    .join('\n')
+
+const mark = (item: Item, answer: string | undefined) => {
+  if (answer === undefined) return '–'
+  if (answer.startsWith(RECOMMEND)) return '✓'
+
+  return item.choices.find(choice => answer === `${choice.key}) ${choice.label}`)?.key ?? '✎'
+}
+
+const send = async ($: EngineInterface, text: string) => {
+  const trimmed = text.trim()
+  if (trimmed === '') return
+
+  await update($, view, (v): View => ({ ...v, phase: 'sent', sent: trimmed, draft: '', editing: '' }))
+  await $.prompt.submit({ text: trimmed, asUser: true })
+}
+
+const answer = ($: EngineInterface, id: string, text: string) =>
+  update($, view, (v): View => {
+    const answers = { ...v.answers }
+    if (text.trim() === '') delete answers[id]
+    else answers[id] = text.trim()
+
+    return { ...v, answers, editing: '', draft: '' }
+  })
+
+const fold = ($: EngineInterface, part: 'choices' | 'summary' | 'diagram' | 'log') =>
+  update($, folded, (f): Folded => ({ ...f, [part]: !f[part] }))
+
+// Fills an entry's gist and detail with a small model's reading of the turn.
+const describe = async ($: EngineInterface, id: string, prompt: string, said: string) => {
+  let gist = ''
+  let detail = ''
+  try {
+    const reply = await $.model.complete({ model: 'haiku', prompt: gistPrompt(prompt, said), maxTokens: 300 })
+    if (reply.isAnswered) ({ gist, detail } = parseGist(reply.text))
+  } catch {
+    // A refused request leaves the fallback below.
+  }
+
+  await update($, log, (entries): Entry[] =>
+    entries.map(entry => (entry.id === id ? { ...entry, gist: gist || fallbackGist(said), detail } : entry)),
+  )
+}
+
+const refresh = async ($: EngineInterface) => {
+  if ((await read($, summary)).isBusy) return
+
+  await update($, summary, (s): Summary => ({ ...s, isBusy: true, error: '' }))
+  await update($, stats, (s): Stats => ({ ...s, sinceSummary: 0 }))
+
+  const { files } = await read($, stats)
+  let made: Partial<Summary> = { error: '요약하지 못했어요.' }
+  try {
+    const reply = await $.model.fork({ prompt: summaryPrompt(lastAnswer, files) })
+    if (reply.isAnswered) {
+      const parsed = parseSummary(reply.text, files)
+      made = parsed ? { ...parsed, at: await $.clock.now(), error: '' } : { error: '요약을 읽지 못했어요.' }
+    } else if (reply.reason === 'nothing-to-fork') {
+      made = { error: '아직 요약할 대화가 없어요.' }
+    }
+  } catch {
+    // Keeps the error above.
+  }
+
+  await update($, summary, (s): Summary => ({ ...s, ...made, isBusy: false }))
+}
+
+const track = ($: EngineInterface, path: string) =>
+  update($, stats, (s): Stats => (s.files.includes(path) ? s : { ...s, files: [...s.files, path] }))
+
+export const register: Register = on => {
+  on('session.start', async ($, e, next) => {
+    await $.command.register({
+      name: 'sidecar',
+      description: 'Open the pane with the options, summary and log of this conversation',
+    })
+    const now = await $.clock.now()
+    await update($, stats, (s): Stats => (s.startedAt > 0 ? s : { ...s, startedAt: now }))
+    // A reload mid-refresh leaves nothing running.
+    await update($, summary, (s): Summary => ({ ...s, isBusy: false }))
+
+    return next(e)
+  })
+
+  on('command.run', { command: 'sidecar' }, async $ => {
+    await $.ui.open({ id: PANE, title: TITLE })
+
+    return { text: '대화 pane을 열었어요.' }
+  })
+
+  on('prompt.submit', async ($, e, next) => {
+    const isOurs = e.origin?.kind === 'plugin' && e.origin.name === PLUGIN
+    if (!isOurs) await update($, view, v => ({ ...v, sent: '' }))
+
+    return next(e)
+  })
+
+  on('turn.start', async ($, e, next) => {
+    if (e.agentId === undefined) {
+      const entry: Entry = {
+        id: e.turnId,
+        at: await $.clock.now(),
+        prompt: promptLine(e.text),
+        gist: '',
+        detail: '',
+        status: 'working',
+      }
+      await update($, view, (v): View => ({ ...v, phase: 'working' }))
+      await update($, log, (entries): Entry[] => [...entries, entry].slice(-LOG_KEPT))
+    }
+
+    return next(e)
+  })
+
+  on('tool.call', { tool: 'Edit' }, async ($, e, next) => {
+    const ran = await next(e)
+    if (ran.deny === undefined && !ran.isError) await track($, e.file_path)
+
+    return ran
+  })
+
+  on('tool.call', { tool: 'Write' }, async ($, e, next) => {
+    const ran = await next(e)
+    if (ran.deny === undefined && !ran.isError) await track($, e.file_path)
+
+    return ran
+  })
+
+  on('tool.call', { tool: 'NotebookEdit' }, async ($, e, next) => {
+    const ran = await next(e)
+    if (ran.deny === undefined && !ran.isError) await track($, e.notebook_path)
+
+    return ran
+  })
+
+  on('turn.complete', async ($, e, next) => {
+    if (e.agentId !== undefined) return next(e)
+
+    const items = e.isAborted ? null : parseQuestions(e.answer)
+    const parsed = e.isAborted || items ? null : parseChoices(e.answer)
+    const fresh = { answers: {}, editing: '', sent: '', draft: '' }
+    await update($, view, (v): View => {
+      if (items) return { ...v, ...fresh, phase: 'options', question: '', choices: [], items }
+      if (parsed) return { ...v, ...fresh, phase: 'options', ...parsed, items: [] }
+
+      return { ...v, phase: 'none', question: '', choices: [], items: [] }
+    })
+    if (items || parsed) void $.ui.open({ id: PANE, title: TITLE })
+
+    const isStopped = e.isAborted || e.answer.trim() === ''
+    const entries = await update($, log, (list): Entry[] =>
+      list.map(entry =>
+        entry.id === e.turnId
+          ? { ...entry, status: isStopped ? 'stopped' : 'done', gist: isStopped ? '중단됨' : entry.gist }
+          : entry,
+      ),
+    )
+    const entry = entries.find(one => one.id === e.turnId)
+    if (entry && !isStopped) {
+      lastAnswer = e.answer
+      void describe($, entry.id, entry.prompt, e.answer).catch(() => undefined)
+    }
+
+    const counted = await update($, stats, (s): Stats => ({ ...s, turns: s.turns + 1, sinceSummary: s.sinceSummary + 1 }))
+    if (counted.sinceSummary >= SUMMARY_EVERY) void refresh($).catch(() => undefined)
+
+    return next(e)
+  })
+
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const table = $.ui.resolve(e)
+    const { Box, Button, Text } = table
+    const Input = 'Input' in table ? table.Input : undefined
+    const v = await read($, view)
+    const f = await read($, folded)
+    const s = await read($, summary)
+    const st = await read($, stats)
+    const entries = await read($, log)
+    const now = await $.clock.now()
+    const columns = (e.props.bodyColumns ?? 40) - 8
+    const rule = <Text dimColor>{'─'.repeat(Math.max(8, Math.min(columns + 8, 60)))}</Text>
+    const arrow = (isFolded: boolean) => (isFolded ? '▶' : '▼')
+
+    const hasChoices = v.phase === 'options' && (v.items.length > 0 || v.choices.length > 0)
+
+    const questions = () => {
+      const answered = v.items.filter(item => v.answers[item.id] !== undefined).length
+      const canFill = v.items.every(item => v.answers[item.id] !== undefined || item.suggestion !== '')
+      const isComplete = answered === v.items.length
+
+      return (
+        <Box flexDirection="column">
+          {v.items.map(item => {
+            const given = v.answers[item.id]
+            const picks = item.choices.map(choice =>
+              fit(`${choice.key}) ${choice.label}${choice.key === item.pick ? ' ✓추천' : ''}`, columns),
+            )
+            const hasOk = item.suggestion !== '' && item.pick === ''
+
+            return (
+              <Box flexDirection="column">
+                <Text bold>{fit(`${item.id} ${item.title}`, columns + 4)}</Text>
+                {item.suggestion !== '' && <Text dimColor>  ➡ {fit(item.suggestion, columns - 4)}</Text>}
+                {given !== undefined && <Text>  → {fit(given, columns - 4)}</Text>}
+                <Box key={`row-${item.id}`} flexDirection="column">
+                  {item.choices.map((choice, index) => (
+                    <Button
+                      key={`pick-${item.id}-${choice.key}`}
+                      label={picks[index]}
+                      onPress={() => answer($, item.id, `${choice.key}) ${choice.label}`)}
+                    />
+                  ))}
+                  {hasOk && (
+                    <Button
+                      key={`ok-${item.id}`}
+                      label={`✓ ${RECOMMEND}`}
+                      onPress={() => answer($, item.id, recommended(item))}
+                    />
+                  )}
+                  <Button
+                    key={`edit-${item.id}`}
+                    label="✎ 직접"
+                    onPress={() =>
+                      update($, view, (cur): View => {
+                        const old = cur.answers[item.id]
+                        const draft = old === undefined || old.startsWith(RECOMMEND) ? '' : old
+
+                        return { ...cur, editing: item.id, draft }
+                      })
+                    }
+                  />
+                </Box>
+              </Box>
+            )
+          })}
+          <Text dimColor>{v.items.map(item => `${item.id} ${mark(item, v.answers[item.id])}`).join('  ')}</Text>
+          {Input && (
+            <Input
+              key="free"
+              label={v.editing === '' ? undefined : `${v.editing} 답`}
+              placeholder={v.editing === '' ? '전체 답 직접 입력' : '이 질문의 답'}
+              submitLabel={v.editing === '' ? '보내기' : '저장'}
+              value={v.draft}
+              onInput={value => update($, view, cur => ({ ...cur, draft: value }))}
+              onSubmit={value => (v.editing === '' ? send($, value) : answer($, v.editing, value))}
+            />
+          )}
+          <Box flexDirection="row">
+            {canFill && !isComplete && (
+              <Button
+                key="send-all"
+                label={answered === 0 ? '모두 추천대로 보내기' : '나머지는 추천대로 보내기'}
+                onPress={() => send($, compose(v, true))}
+              />
+            )}
+            {answered > 0 && (
+              <Button
+                key="send-picked"
+                label={isComplete ? '보내기' : '고른 것만 보내기'}
+                onPress={() => send($, compose(v, false))}
+              />
+            )}
+          </Box>
+        </Box>
+      )
+    }
+
+    const letters = () => (
+      <Box flexDirection="column">
+        {v.question !== '' && <Text dimColor>Q. {v.question}</Text>}
+        {v.choices.map(choice => (
+          <Box flexDirection="row">
+            <Button
+              key={`choice-${choice.key}`}
+              hotkey={choice.key}
+              label={fit(`${choice.key}) ${choice.label}`, columns)}
+              onPress={() => send($, `${choice.key}) ${choice.label}`)}
+            />
+            <Button
+              key={`edit-${choice.key}`}
+              label="✎"
+              onPress={() =>
+                update($, view, cur => ({ ...cur, draft: `${choice.key}) ${choice.label}, ` }))
+              }
+            />
+          </Box>
+        ))}
+        {Input && (
+          <Input
+            key="free"
+            placeholder="직접 입력"
+            submitLabel="보내기"
+            value={v.draft}
+            onInput={value => update($, view, cur => ({ ...cur, draft: value }))}
+            onSubmit={value => send($, value)}
+          />
+        )}
+        <Text dimColor>pane에 포커스가 있으면 {v.choices.map(c => c.key).join(' / ')} 키로 선택</Text>
+      </Box>
+    )
+
+    const files = [...new Set(st.files.map(baseName))]
+    const shown = entries.slice(-LOG_SHOWN).reverse()
+
+    return (
+      <Box flexDirection="column">
+        {hasChoices && (
+          <Box flexDirection="column">
+            <Button key="fold-choices" plain label={`${arrow(f.choices)} 선택지`} onPress={() => fold($, 'choices')} />
+            {!f.choices && (v.items.length > 0 ? questions() : letters())}
+            {rule}
+          </Box>
+        )}
+
+        <Box flexDirection="row">
+          <Button
+            key="fold-summary"
+            plain
+            label={`${arrow(f.summary)} 요약${s.at > 0 ? ` · ${clockTime(s.at)} 갱신` : ''}`}
+            onPress={() => fold($, 'summary')}
+          />
+          <Button
+            key="refresh"
+            label={s.isBusy ? '갱신 중…' : '↻ 갱신'}
+            onPress={() => (s.isBusy ? undefined : refresh($))}
+          />
+        </Box>
+        {!f.summary && (
+          <Box flexDirection="column">
+            {s.error !== '' && <Text dimColor>{s.error}</Text>}
+            {s.at === 0 && !s.isBusy && s.error === '' && (
+              <Text dimColor>아직 요약이 없어요. {SUMMARY_EVERY}턴마다 만들거나 ↻ 갱신으로 바로 만들어요.</Text>
+            )}
+            {s.at > 0 && <Text>목표  {fit(s.goal, columns - 2)}</Text>}
+            {s.at > 0 && s.decisions.length > 0 && <Text>결정</Text>}
+            {s.at > 0 && s.decisions.map(item => <Text>  • {fit(item, columns - 4)}</Text>)}
+            {files.length > 0 && <Text>바뀐 파일  {fit(files.join(', '), columns - 6)}</Text>}
+            {s.at > 0 && s.open.length > 0 && <Text>남은 일</Text>}
+            {s.at > 0 && s.open.map(item => <Text>  • {fit(item, columns - 4)}</Text>)}
+          </Box>
+        )}
+        {rule}
+
+        <Button key="fold-diagram" plain label={`${arrow(f.diagram)} 작업 그림`} onPress={() => fold($, 'diagram')} />
+        {!f.diagram && (
+          <Box flexDirection="column">
+            {s.nodes.length === 0 && (
+              <Text dimColor>{s.at > 0 ? '그릴 코드 작업이 아직 없어요.' : '요약을 갱신하면 함께 그려요.'}</Text>
+            )}
+            {layout(s.nodes, s.edges, columns + 8).map(line => (
+              <Text>
+                {line.map(seg =>
+                  seg.tone === undefined ? (
+                    seg.text
+                  ) : (
+                    <Text color={seg.tone === 'new' ? 'success' : seg.tone === 'changed' ? 'warning' : undefined} dimColor={seg.tone === 'dim'}>
+                      {seg.text}
+                    </Text>
+                  ),
+                )}
+              </Text>
+            ))}
+            {s.nodes.some(node => node.status !== 'other') && (
+              <Text dimColor>
+                <Text color="success">새로 만듦</Text> · <Text color="warning">고침</Text>
+              </Text>
+            )}
+          </Box>
+        )}
+        {rule}
+
+        <Button
+          key="fold-log"
+          plain
+          label={`${arrow(f.log)} 로그 · 턴 ${st.turns}${st.startedAt > 0 ? ` · ${span(now - st.startedAt)}` : ''}`}
+          onPress={() => fold($, 'log')}
+        />
+        {!f.log && (
+          <Box flexDirection="column">
+            {shown.length === 0 && <Text dimColor>아직 기록이 없어요.</Text>}
+            {shown.map(entry => {
+              const isWorking = entry.status === 'working'
+              const gist = entry.gist !== '' ? entry.gist : isWorking ? '답변 중…' : '요약하는 중…'
+
+              return (
+                <Box flexDirection="column">
+                  <Button
+                    key={`entry-${entry.id}`}
+                    plain
+                    label={fit(`${isWorking ? '● ' : ''}${clockTime(entry.at)} 나  ${entry.prompt}`, columns + 4)}
+                    onPress={() =>
+                      update($, folded, (cur): Folded => ({ ...cur, open: cur.open === entry.id ? '' : entry.id }))
+                    }
+                  />
+                  <Text dimColor>      ↳ {fit(gist, columns - 4)}</Text>
+                  {f.open === entry.id &&
+                    entry.detail
+                      .split('\n')
+                      .filter(line => line !== '')
+                      .map(line => <Text>        {fit(line, columns - 6)}</Text>)}
+                </Box>
+              )
+            })}
+          </Box>
+        )}
+      </Box>
+    )
+  })
+}
