@@ -305,6 +305,41 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.unmount()
   })
 
+  test(`sending is the primary action (${surface})`, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    on('turn.start', (_, e) => ({ turnId: e.turnId }))
+    on('turn.complete', (_, e) => ({ text: e.answer }))
+
+    await answer($, NAMED)
+    const ui = await $.ui.mount({ ...PANE, surface })
+
+    expect((await ui.find({ key: 'send-all' }))?.props.variant).toBe('primary')
+    await ui.press({ key: 'ok-Q1' })
+    expect((await ui.find({ key: 'send-picked' }))?.props.variant).toBe('primary')
+    await ui.unmount()
+  })
+
+  test(`the recommended option wears a success chip (${surface})`, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    on('turn.start', (_, e) => ({ turnId: e.turnId }))
+    on('turn.complete', (_, e) => ({ text: e.answer }))
+
+    await answer($, NAMED)
+    const ui = await $.ui.mount({ ...PANE, surface })
+
+    const button = await ui.find({ key: 'pick-Q3-a' })
+    const chip = button?.children.find(
+      (child): child is { type: string; props: Record<string, unknown> } =>
+        typeof child === 'object' && child !== null && (child as { type?: unknown }).type === 'Text',
+    )
+    expect(chip?.props.color).toBe('success')
+    expect(button?.text).toBe('a) dev ✓추천')
+    expect((await ui.find({ key: 'pick-Q3-b' }))?.text).toBe('b) main')
+    await ui.unmount()
+  })
+
   test(`an option cut to fit goes out as its key alone (${surface})`, async ($, on) => {
     mock.clock(on, { now: NOW })
     const sent: string[] = []
@@ -348,6 +383,8 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await answer($, long)
     const ui = await $.ui.mount({ ...PANE, surface })
 
+    // Its mark is cut too, so no chip claims it.
+    expect((await ui.find({ key: 'pick-Q1-b' }))?.children).toEqual([])
     await ui.press({ key: 'pick-Q1-b' })
     expect(await ui.find({ type: 'Text', text: 'Q1 b' })).toBeDefined()
     await ui.press({ key: 'send-picked' })

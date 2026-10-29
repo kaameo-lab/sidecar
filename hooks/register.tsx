@@ -117,7 +117,9 @@ const answer = ($: EngineInterface, id: string, text: string) =>
     return { ...v, answers, editing: '', draft: '' }
   })
 
-const fold = ($: EngineInterface, part: 'choices' | 'summary' | 'diagram' | 'log') =>
+type Section = 'choices' | 'summary' | 'diagram' | 'log'
+
+const fold = ($: EngineInterface, part: Section) =>
   update($, folded, (f): Folded => ({ ...f, [part]: !f[part] }))
 
 // Fills an entry's gist and detail with a small model's reading of the turn.
@@ -273,7 +275,19 @@ export const register: Register = on => {
     const now = await $.clock.now()
     const columns = (e.props.bodyColumns ?? 40) - 8
     const rule = <Text dimColor>{'─'.repeat(Math.max(8, Math.min(columns + 8, 60)))}</Text>
-    const arrow = (isFolded: boolean) => (isFolded ? '▶' : '▼')
+    // A section's fold button: its name in the accent, what follows it dim.
+    const heading = (part: Section, name: string, meta = '') => {
+      const title = `${f[part] ? '▶' : '▼'} ${name}`
+
+      return (
+        <Button key={`fold-${part}`} plain label={`${title}${meta}`} onPress={() => fold($, part)}>
+          <Text bold color="claude">
+            {title}
+          </Text>
+          {meta !== '' && <Text dimColor>{meta}</Text>}
+        </Button>
+      )
+    }
 
     const hasChoices = v.phase === 'options' && (v.items.length > 0 || v.choices.length > 0)
 
@@ -291,17 +305,26 @@ export const register: Register = on => {
 
             return (
               <Box flexDirection="column">
-                <Text bold>{fit(`${item.id} ${item.title}`, columns + 4)}</Text>
-                {item.suggestion !== '' && <Text dimColor>  ➡ {fit(item.suggestion, columns - 4)}</Text>}
-                {given !== undefined && <Text>  → {fit(given, columns - 4)}</Text>}
+                <Text bold color="claude">
+                  {fit(`${item.id} ${item.title}`, columns + 4)}
+                </Text>
+                {item.suggestion !== '' && <Text color="suggestion">  ➡ {fit(item.suggestion, columns - 4)}</Text>}
+                {given !== undefined && <Text color="success">  → {fit(given, columns - 4)}</Text>}
                 <Box key={`row-${item.id}`} flexDirection="column">
-                  {item.choices.map((choice, index) => (
-                    <Button
-                      key={`pick-${item.id}-${choice.key}`}
-                      label={picks[index]}
-                      onPress={() => answer($, item.id, picked(item, choice, columns))}
-                    />
-                  ))}
+                  {item.choices.map((choice, index) => {
+                    // A mark cut to fit would show only part of it: no chip then.
+                    const hasChip = choice.key === item.pick && isWhole(pickLabel(item, choice), columns)
+
+                    return (
+                      <Button
+                        key={`pick-${item.id}-${choice.key}`}
+                        label={picks[index]}
+                        onPress={() => answer($, item.id, picked(item, choice, columns))}
+                      >
+                        {hasChip && [said(choice), <Text color="success">{MARK}</Text>]}
+                      </Button>
+                    )
+                  })}
                   {hasOk && (
                     <Button
                       key={`ok-${item.id}`}
@@ -312,6 +335,7 @@ export const register: Register = on => {
                   <Button
                     key={`edit-${item.id}`}
                     label="✎ 직접"
+                    dimColor
                     onPress={() =>
                       update($, view, (cur): View => {
                         const old = cur.answers[item.id]
@@ -325,7 +349,17 @@ export const register: Register = on => {
               </Box>
             )
           })}
-          <Text dimColor>{v.items.map(item => `${item.id} ${mark(item, v.answers[item.id])}`).join('  ')}</Text>
+          <Text>
+            {v.items.map((item, index) => {
+              const isOpen = v.answers[item.id] === undefined
+
+              return (
+                <Text color={isOpen ? undefined : 'success'} dimColor={isOpen}>
+                  {`${index > 0 ? '  ' : ''}${item.id} ${mark(item, v.answers[item.id])}`}
+                </Text>
+              )
+            })}
+          </Text>
           {Input && (
             <Input
               key="free"
@@ -341,6 +375,7 @@ export const register: Register = on => {
             {canFill && !isComplete && (
               <Button
                 key="send-all"
+                variant="primary"
                 label={answered === 0 ? '모두 추천대로 보내기' : '나머지는 추천대로 보내기'}
                 onPress={() => send($, compose(v, true, columns))}
               />
@@ -348,6 +383,7 @@ export const register: Register = on => {
             {answered > 0 && (
               <Button
                 key="send-picked"
+                variant="primary"
                 label={isComplete ? '보내기' : '고른 것만 보내기'}
                 onPress={() => send($, compose(v, false, columns))}
               />
@@ -359,7 +395,11 @@ export const register: Register = on => {
 
     const letters = () => (
       <Box flexDirection="column">
-        {v.question !== '' && <Text dimColor>Q. {v.question}</Text>}
+        {v.question !== '' && (
+          <Text bold color="claude">
+            Q. {v.question}
+          </Text>
+        )}
         {v.choices.map(choice => {
           const words = isWhole(said(choice), columns) ? said(choice) : choice.key
 
@@ -374,6 +414,7 @@ export const register: Register = on => {
               <Button
                 key={`edit-${choice.key}`}
                 label="✎"
+                dimColor
                 onPress={() => update($, view, cur => ({ ...cur, draft: `${words}, ` }))}
               />
             </Box>
@@ -400,19 +441,14 @@ export const register: Register = on => {
       <Box flexDirection="column">
         {hasChoices && (
           <Box flexDirection="column">
-            <Button key="fold-choices" plain label={`${arrow(f.choices)} 선택지`} onPress={() => fold($, 'choices')} />
+            {heading('choices', '선택지')}
             {!f.choices && (v.items.length > 0 ? questions() : letters())}
             {rule}
           </Box>
         )}
 
         <Box flexDirection="row">
-          <Button
-            key="fold-summary"
-            plain
-            label={`${arrow(f.summary)} 요약${s.at > 0 ? ` · ${clockTime(s.at)} 갱신` : ''}`}
-            onPress={() => fold($, 'summary')}
-          />
+          {heading('summary', '요약', s.at > 0 ? ` · ${clockTime(s.at)} 갱신` : '')}
           <Button
             key="refresh"
             label={s.isBusy ? '갱신 중…' : '↻ 갱신'}
@@ -435,7 +471,7 @@ export const register: Register = on => {
         )}
         {rule}
 
-        <Button key="fold-diagram" plain label={`${arrow(f.diagram)} 작업 그림`} onPress={() => fold($, 'diagram')} />
+        {heading('diagram', '작업 그림')}
         {!f.diagram && (
           <Box flexDirection="column">
             {s.nodes.length === 0 && (
@@ -463,12 +499,7 @@ export const register: Register = on => {
         )}
         {rule}
 
-        <Button
-          key="fold-log"
-          plain
-          label={`${arrow(f.log)} 로그 · 턴 ${st.turns}${st.startedAt > 0 ? ` · ${span(now - st.startedAt)}` : ''}`}
-          onPress={() => fold($, 'log')}
-        />
+        {heading('log', '로그', ` · 턴 ${st.turns}${st.startedAt > 0 ? ` · ${span(now - st.startedAt)}` : ''}`)}
         {!f.log && (
           <Box flexDirection="column">
             {shown.length === 0 && <Text dimColor>아직 기록이 없어요.</Text>}
