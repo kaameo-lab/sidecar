@@ -19,16 +19,22 @@ pane은 대화형 세션이 시작될 때와 답에서 선택지가 잡혔을 �
 
 ## 설치
 
-저장소를 받은 뒤 둘 중 하나로 불러옵니다.
+Claude Code 안에서 한 줄로 설치합니다(Claude Code 2.1.275 이상).
+
+```
+/plugin install sidecar --marketplace kaameo-lab/sidecar
+```
+
+터미널에서는 마켓플레이스를 추가한 뒤 설치합니다.
 
 ```sh
-# 한 세션에서만 쓰기
-git clone https://github.com/kaameo-lab/sidecar.git
-claude --plugin-dir ./sidecar
-
-# 다음 세션부터 늘 쓰기
-git clone https://github.com/kaameo-lab/sidecar.git ~/.claude/skills/sidecar
+claude plugin marketplace add kaameo-lab/sidecar
+claude plugin install sidecar@kaameo-lab
 ```
+
+업데이트는 `claude plugin update sidecar@kaameo-lab`, 제거는 `claude plugin uninstall sidecar@kaameo-lab`입니다.
+
+설치하지 않고 한 세션에서만 써 보려면 저장소를 받아 `claude --plugin-dir ./sidecar`로 실행합니다.
 
 ## 동작과 데이터
 

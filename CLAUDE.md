@@ -20,6 +20,8 @@ claude plugin test          # runs every *.test.ts(x) under the folder; exits 1 
 claude plugin validate .    # checks .claude-plugin/plugin.json and hooks/hooks.json
 ```
 
+The repo is also its own marketplace (`kaameo-lab`, `.claude-plugin/marketplace.json`, `"source": "./"`), so users install with `claude plugin install sidecar@kaameo-lab`. To release, bump `version` in both `plugin.json` and `marketplace.json`, commit, then `claude plugin tag .` and push the tag.
+
 `claude plugin test` takes only a folder and has no option to pick one test by name. All tests are in `tests/sidecar.test.tsx`. `tsconfig.json` extends `.claude-plugin/types/tsconfig.json`, which the host generates and which is not checked in.
 
 ## Architecture

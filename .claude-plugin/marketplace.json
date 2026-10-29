@@ -1,0 +1,18 @@
+{
+  "name": "kaameo-lab",
+  "owner": {
+    "name": "kaameo",
+    "url": "https://github.com/kaameo-lab"
+  },
+  "metadata": {
+    "description": "sidecar: a pane beside Claude Code with buttons for its options and questions, a session summary, a work diagram and a log."
+  },
+  "plugins": [
+    {
+      "name": "sidecar",
+      "source": "./",
+      "description": "A side pane with buttons for Claude's options and questions, a session summary, a work diagram, and a log of the conversation",
+      "version": "0.4.0"
+    }
+  ]
+}
