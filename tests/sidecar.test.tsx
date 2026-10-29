@@ -762,6 +762,22 @@ const snapshot = (shape: string) => ({
   folded: { choices: false, summary: false, diagram: false, log: false, open: '' },
 })
 
+test('a reload keeps the pane it holds over the saved one', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  fakeStore(on, 's1', new Map([['session:s1', snapshot('log-1 summary-2 stats-2 folded-2')]]))
+
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  // Folding saves nothing, so the snapshot still has the summary open.
+  await ui.press({ key: 'fold-summary' })
+  // A reload of the mod raises session.start again.
+  await $.session.start(START)
+  expect(await ui.find({ type: 'Text', text: '목표  로그인 흐름 정리' })).toBeUndefined()
+  await ui.unmount()
+})
+
 for (const [how, shape, isBack] of [
   ['gets its pane back', 'log-1 summary-2 stats-2 folded-2', true],
   ['saved by an older version starts empty', 'log-1 summary-1 stats-1 folded-2', false],

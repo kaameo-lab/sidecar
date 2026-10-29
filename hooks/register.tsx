@@ -235,8 +235,8 @@ const savedKey = (id: string) => `session:${id}`
 // Keeps this session's pane in the store, which outlives the process, so a
 // resumed session draws it again; only the latest few sessions are kept, and
 // of each only the log rows the pane shows, so the store stays under its cap.
-const save = async ($: EngineInterface) => {
-  const id = await $.session.id()
+const save = async ($: EngineInterface, ending?: string) => {
+  const id = ending ?? (await $.session.id())
   const saved: Saved = {
     shape: SAVED_SHAPE,
     log: (await read($, log)).slice(-LOG_SHOWN),
@@ -269,6 +269,17 @@ const restore = async ($: EngineInterface) => {
   await update($, folded, (): Folded => saved.folded)
 }
 
+// Empties the pane for another conversation in this process; the folds are
+// the person's, not the conversation's.
+const reset = async ($: EngineInterface) => {
+  const now = await $.clock.now()
+  lastAnswer = ''
+  await update($, view, (): View => EMPTY_VIEW)
+  await update($, log, (): Entry[] => NO_ENTRIES)
+  await update($, summary, (): Summary => EMPTY_SUMMARY)
+  await update($, stats, (): Stats => ({ ...EMPTY_STATS, startedAt: now }))
+}
+
 // What a turn leaves to run after it: the files git saw change, then the save.
 const afterTurn = async ($: EngineInterface) => {
   await sweep($).catch(() => undefined)
@@ -281,7 +292,8 @@ export const register: Register = on => {
       name: 'sidecar',
       description: 'Open the pane with the options, summary and log of this conversation',
     })
-    await restore($).catch(() => undefined)
+    // A reload finds the pane still held; a fresh process finds it empty.
+    if ((await read($, stats)).startedAt === 0) await restore($).catch(() => undefined)
     const now = await $.clock.now()
     await update($, stats, (s): Stats => (s.startedAt > 0 ? s : { ...s, startedAt: now }))
     await settle($)
@@ -293,19 +305,13 @@ export const register: Register = on => {
   })
 
   // The last word on what the session leaves for a resume: gists that landed
-  // after the last turn's save, folds changed since. A /clear goes on in this
-  // process under a new id with no session.start, so the pane starts over
-  // here; the next turn's sweep settles a fresh git base.
+  // after the last turn's save, folds changed since. Saved under the ending
+  // session's own id, whatever the process goes on as. A /clear goes on in
+  // this process under a new id with no session.start, so the pane starts
+  // over here; the next turn's sweep settles a fresh git base.
   on('session.end', async ($, e, next) => {
-    await save($).catch(() => undefined)
-    if (e.reason === 'clear') {
-      const now = await $.clock.now()
-      lastAnswer = ''
-      await update($, view, (): View => EMPTY_VIEW)
-      await update($, log, (): Entry[] => NO_ENTRIES)
-      await update($, summary, (): Summary => EMPTY_SUMMARY)
-      await update($, stats, (): Stats => ({ ...EMPTY_STATS, startedAt: now }))
-    }
+    await save($, e.sessionId).catch(() => undefined)
+    if (e.reason === 'clear') await reset($)
 
     return next(e)
   })
