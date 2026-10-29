@@ -6,7 +6,9 @@
 
 **Claude Code 옆에 붙는 pane.** Claude가 선택지나 질문을 내놓으면 버튼으로 바로 답하고, 이 세션에서 정한 것과 남은 일, 손댄 파일의 구조, 턴별로 한 일을 한눈에 봅니다.
 
-<!-- 대표 GIF: docs/media/demo.gif -->
+<p align="center">
+  <img src="docs/media/demo.gif" alt="sidecar pane에서 Q1~Q6 질문에 추천 답을 고르고 직접 입력을 누르며, 상태 줄이 Q1 ✓ Q2 ✓로 바뀌고 요약과 로그가 이어지는 장면" width="480">
+</p>
 
 <p align="center">
   <a href="#설치">설치</a> · <a href="#보이는-것">보이는 것</a> · <a href="#사용">사용</a> · <a href="#접근-범위">접근 범위</a> · <a href="#문제-해결">문제 해결</a> · <a href="CHANGELOG.md">변경 기록</a>
@@ -54,7 +56,9 @@ claude --plugin-dir ./sidecar
 | **작업 그림** | 이 세션에서 만들거나(초록) 고친(노랑) 파일과 모듈을 상자와 선으로 | 요약을 갱신할 때 |
 | **로그** | 턴마다 한 줄: 무엇을 물었고 Claude가 무엇을 했는지. 누르면 자세한 줄이 펼쳐집니다. | 턴이 끝날 때마다 |
 
-<!-- 섹션별: docs/media/choices.png, docs/media/summary.png, docs/media/log.png -->
+<p align="center">
+  <img src="docs/media/summary.png" alt="요약 섹션의 목표·결정·바뀐 파일·남은 일과, 작업 그림 섹션에 register.tsx가 parse.ts, digest.ts, diagram.ts, index.d.ts로 이어지는 상자 그림" width="640">
+</p>
 
 pane은 대화형 세션이 시작될 때와 답에서 선택지를 찾았을 때 열립니다. 색은 사용 중인 Claude Code 테마를 따릅니다.
 
