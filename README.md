@@ -7,7 +7,7 @@
 **Claude Code 옆에 붙는 pane.** Claude가 선택지나 질문을 내놓으면 버튼으로 바로 답하고, 이 세션에서 정한 것과 남은 일, 손댄 파일의 구조, 턴별로 한 일을 한눈에 봅니다.
 
 <p align="center">
-  <img src="docs/media/demo.gif" alt="sidecar pane에서 Q1~Q6 질문에 추천 답을 고르고 직접 입력을 누르며, 상태 줄이 Q1 ✓ Q2 ✓로 바뀌고 요약과 로그가 이어지는 장면" width="480">
+  <img src="docs/media/demo.gif" alt="Claude Code 대화 옆의 sidecar pane: Claude가 Q1~Q4 질문을 내놓자 pane에 버튼이 생기고, 질문마다 답을 골라 보내면 요약에 남은 일이 채워지는 장면 (2배속)" width="100%">
 </p>
 
 <p align="center">
