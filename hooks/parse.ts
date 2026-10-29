@@ -95,7 +95,41 @@ export const parseChoices = (answer: string): Parsed | null => {
     return { question: asked ? asQuestion(asked) : '', choices: group.choices }
   }
 
-  return null
+  return headedOf(lines)
+}
+
+// "**A. 안**" or "### A. 안" over each alternative's own paragraph. Lettered
+// only: numbered headings are as often a report's sections.
+const HEADING = /^\s*(?:#{2,4}\s+(?:\*\*)?|\*\*)\(?([A-J])[.):](?:\*\*)?\s+([^*]+?)\s*(?:\*\*.*)?$/
+// What the answer's last lines say to ask for one of them.
+const PICK = /[?？]|어느 (?:쪽|것|걸|안|방법)|중에서|골라|고르시/
+const TAIL_MAX = 3
+
+const headedOf = (lines: string[]): Parsed | null => {
+  let run: { at: number; choice: Choice }[] = []
+  let isInFence = false
+
+  lines.forEach((line, at) => {
+    if (/^\s*(```|~~~)/.test(line)) isInFence = !isInFence
+    const match = isInFence ? null : HEADING.exec(line)
+    if (!match) return
+
+    const choice = { key: (match[1] ?? '').toLowerCase(), label: clean(match[2] ?? '') }
+    if (run.length > 0 && LETTERS[run.length] === choice.key) run.push({ at, choice })
+    else run = choice.key === 'a' ? [{ at, choice }] : []
+  })
+  const last = run[run.length - 1]
+  if (run.length < 2 || last === undefined) return null
+
+  const tail = lines
+    .slice(last.at + 1)
+    .filter(line => line.trim() !== '')
+    .slice(-TAIL_MAX)
+  if (!tail.some(line => PICK.test(line))) return null
+
+  const asked = [...tail].reverse().find(line => /[?？]/.test(line))
+
+  return { question: asked ? asQuestion(asked) : '', choices: run.map(one => one.choice) }
 }
 
 // "❓ Q1 - title: body", "**Q2.** body", "- Q3) body"

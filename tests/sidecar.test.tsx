@@ -115,6 +115,33 @@ test('a numbered list offered to pick from counts without a question mark', () =
   expect(parseChoices('둘 중 어느 쪽으로 할지도 #88의 결정 항목입니다.\n\n**제안하는 진행 순서**\n1. 담당자와 정한다.\n2. 작업한다.')).toBeNull()
 })
 
+const HEADED = [
+  '발표 13번 뒤에 넣을 화면으로 두 안을 만들었어요.',
+  '',
+  '**A. 어두운 무대**',
+  '배경을 어둡게 하고 보류된 HP만 밝게 띄워요.',
+  '',
+  '**B. 밝은 바탕 + 원형 보류**',
+  '흰 바탕에 보류 금액을 원으로 그려요.',
+  '',
+  '어느 쪽으로 할까요? 고르시면 원본 파일에 넣을게요.',
+].join('\n')
+
+test('lettered headings with a paragraph each are options too', () => {
+  expect(parseChoices(HEADED)).toEqual({
+    question: '어느 쪽으로 할까요? 고르시면 원본 파일에 넣을게요.',
+    choices: [
+      { key: 'a', label: '어두운 무대' },
+      { key: 'b', label: '밝은 바탕 + 원형 보류' },
+    ],
+  })
+  expect(parseChoices(HEADED.replace('### ', '').replace('**A. 어두운 무대**', '### A. 어두운 무대'))?.choices).toHaveLength(2)
+  // Numbered headings are as often a report's sections, so they stay text.
+  expect(parseChoices(HEADED.replace('**A.', '**1.').replace('**B.', '**2.'))).toBeNull()
+  // Nothing asked at the end: sections, not options.
+  expect(parseChoices(HEADED.replace('어느 쪽으로 할까요? 고르시면 원본 파일에 넣을게요.', '두 안 모두 저장해 뒀어요.'))).toBeNull()
+})
+
 test('lists in code fences and lone items are ignored; the last list wins', () => {
   expect(parseChoices('```\na) x\nb) y\n```')).toBeNull()
   expect(parseChoices('a) 하나뿐')).toBeNull()
