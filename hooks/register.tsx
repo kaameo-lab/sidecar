@@ -549,6 +549,10 @@ export const register: Register = on => {
       )
     }
 
+    // A choice shares its row with its ✎ button, each drawn "[ … ]" on the
+    // terminal, four cells over its label.
+    const choiceRoom = body - 4 - (cells('✎') + 4)
+
     const letters = () => (
       <Box flexDirection="column">
         {v.question !== '' && (
@@ -557,14 +561,14 @@ export const register: Register = on => {
           </Text>
         )}
         {v.choices.map(choice => {
-          const words = isWhole(said(choice), columns) ? said(choice) : choice.key
+          const words = isWhole(said(choice), choiceRoom) ? said(choice) : choice.key
 
           return (
             <Box flexDirection="row">
               <Button
                 key={`choice-${choice.key}`}
                 hotkey={choice.key}
-                label={fit(said(choice), columns)}
+                label={fit(said(choice), choiceRoom)}
                 onPress={() => send($, words)}
               />
               <Button

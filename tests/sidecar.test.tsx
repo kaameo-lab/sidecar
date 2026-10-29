@@ -418,6 +418,21 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.unmount()
   })
 
+  test(`an option row and its edit button fit the pane together (${surface})`, async ($, on) => {
+    const sent = host(on)
+    const label = '그대로 올리기: 공개돼도 괜찮은 개인 프로젝트라면 넣기'
+    await answer($, `어느 쪽?\na) ${label}\nb) 다시 찍기`)
+    const ui = await $.ui.mount({ ...PANE, surface })
+
+    // On the terminal a Button is drawn "[ label ]", four cells over its label.
+    const drawn = (key: string) => ui.find({ key }).then(button => cells(String(button?.props.label ?? '')) + 4)
+    // bodyColumns 40 less the two-cell margin.
+    expect((await drawn('choice-a')) + (await drawn('edit-a'))).toBeLessThanOrEqual(38)
+    await ui.press({ key: 'choice-a' })
+    expect(sent).toEqual(['a'])
+    await ui.unmount()
+  })
+
   test(`an option cut to fit goes out as its key alone (${surface})`, async ($, on) => {
     const sent = host(on)
 
