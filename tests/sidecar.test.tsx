@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { Engine } from 'claude-code/testing'
 
-import { parseChoices, parseQuestions } from '../hooks/parse'
+import { parseChoices, parseNumbered, parseQuestions } from '../hooks/parse'
 import { cells, fit } from '../hooks/width'
 import { parseGist, parseSummary, promptLine, span, summaryPrompt } from '../hooks/digest'
 import { layout, plainText } from '../hooks/diagram'
@@ -57,6 +57,16 @@ test('the other spellings parse too', () => {
 test('numbered steps without a question are not options', () => {
   expect(parseChoices('설치 순서:\n1. 받기\n2. 풀기\n3. 실행')).toBeNull()
   expect(parseChoices('어떤 걸 먼저 할까요?\n1. 받기\n2. 풀기')?.choices.length).toBe(2)
+})
+
+test('a numbered list offered to pick from counts without a question mark', () => {
+  const offered = '지금 설정을 그대로 둘지 정해 주세요. 바꾸고 싶다면 다음 중에서 고르시면 됩니다.\n\n1. 항목을 더합니다.\n2. 프롬프트를 붙여 주세요.'
+  expect(parseChoices(offered)?.choices.map(choice => choice.key)).toEqual(['1', '2'])
+  expect(parseChoices('네, 만들 수 있습니다. 방법은 두 가지입니다.\n\n1. pptx로 만들기\n2. 슬라이드로 만들기')?.choices).toHaveLength(2)
+  // Only the line right before the list offers it: a heading there makes it a section.
+  expect(parseChoices('프로젝트를 골라 고쳐 보는 스킬입니다.\n## 워크플로우\n1. 인테이크\n2. 로드맵')).toBeNull()
+  // Steps that mention a choice made elsewhere are still steps.
+  expect(parseChoices('둘 중 어느 쪽으로 할지도 #88의 결정 항목입니다.\n\n**제안하는 진행 순서**\n1. 담당자와 정한다.\n2. 작업한다.')).toBeNull()
 })
 
 test('lists in code fences and lone items are ignored; the last list wins', () => {
@@ -129,6 +139,28 @@ test('a suggestion loses its label and names its option', () => {
     ['나눕니다.', ''],
     ['a) 팀 워크플로우가 dev 병합입니다.', 'a'],
   ])
+})
+
+const NUMBERED = [
+  '작업은 끝났어요.',
+  '',
+  '이제 두 가지를 정해 주세요.',
+  '1. **이슈 #48**: 닫을까요?',
+  '2. 다음 작업으로 13장 2단계 이슈를 만들까요? 범위는 등록·조회예요.',
+  '',
+  '답해 주시면 진행할게요.',
+].join('\n')
+
+test('a numbered list of questions becomes numbered items', () => {
+  expect(parseNumbered(NUMBERED)).toEqual([
+    { id: '1번', title: '이슈 #48', suggestion: '', choices: [], pick: '' },
+    { id: '2번', title: '다음 작업으로 13장 2단계 이슈를 만들까요? 범위는 등록·조회예요.', suggestion: '', choices: [], pick: '' },
+  ])
+  // One item that asks nothing makes it a plain list.
+  expect(parseNumbered('정할 것:\n1. 닫을까요?\n2. 브랜치는 지웁니다.')).toBeNull()
+  // A list well before the end is not what the answer leaves to answer.
+  expect(parseNumbered(`${NUMBERED}\n\n그 밖에\n\n네 줄이\n\n더 있습니다.\n\n끝.`)).toBeNull()
+  expect(parseNumbered('```\n1. 닫을까요?\n2. 열까요?\n```')).toBeNull()
 })
 
 test('fit counts Hangul as two cells', () => {
@@ -319,6 +351,30 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(line).toMatch(/^Q\. 인증 흐름을.*…$/)
     // bodyColumns 40 leaves the pane 36 cells for a heading row.
     expect(cells(line)).toBeLessThanOrEqual(36)
+    await ui.unmount()
+  })
+
+  test(`numbered questions are answered by their numbers (${surface})`, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    const sent: string[] = []
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    on('turn.start', (_, e) => ({ turnId: e.turnId }))
+    on('turn.complete', (_, e) => ({ text: e.answer }))
+    on('prompt.submit', (_, e) => {
+      sent.push(e.text)
+      return { text: e.text }
+    })
+
+    await answer($, NUMBERED)
+    const ui = await $.ui.mount({ ...PANE, surface })
+
+    expect(await ui.find({ type: 'Text', text: '1번 이슈 #48' })).toBeDefined()
+    await ui.press({ key: 'edit-1번' })
+    await ui.input({ key: 'free', text: '닫아 주세요' })
+    await ui.press({ key: 'edit-2번' })
+    await ui.input({ key: 'free', text: '만들어 주세요' })
+    await ui.press({ key: 'send-picked' })
+    expect(sent).toEqual(['1번: 닫아 주세요\n2번: 만들어 주세요'])
     await ui.unmount()
   })
 

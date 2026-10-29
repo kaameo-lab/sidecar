@@ -11,6 +11,12 @@ const ITEM = /^\s*(?:[-*+]\s+)?(?:\*\*|__)?\(?([a-jA-J]|[1-9])[.):](?:\*\*|__)?\
 
 type Group = { kind: 'letter' | 'digit'; start: number; end: number; choices: Choice[] }
 
+// Words on the line just before a numbered list that offer it to pick from,
+// and the headings that make it steps to follow whatever they mention.
+const OFFER =
+  /중에서|중 하나|둘 중|(?:두|세|네) 가지 (?:방법|안|선택지)|방법은 (?:두|세|네) 가지|골라|고르시|추천(?:합니다|드립니다|해요)[.:]?\s*$/
+const STEPS = /진행 순서|진행 방식|다음 액션|할 일/
+
 const clean = (text: string) => {
   const plain = text
     .replace(/\*\*|__|`/g, '')
@@ -22,7 +28,8 @@ const clean = (text: string) => {
 
 const asQuestion = (line: string) => clean(line).replace(/^(?:#+\s*|[-*+>]\s+)/, '')
 
-export const parseChoices = (answer: string): Parsed | null => {
+// Every run of two or more consecutive options outside code fences, in order.
+const groupsOf = (answer: string) => {
   const lines = answer.split('\n')
   const groups: Group[] = []
   let open: Group | null = null
@@ -67,13 +74,21 @@ export const parseChoices = (answer: string): Parsed | null => {
   })
   close()
 
+  return { lines, groups }
+}
+
+export const parseChoices = (answer: string): Parsed | null => {
+  const { lines, groups } = groupsOf(answer)
+
   for (const group of groups.reverse()) {
     const before = lines.slice(0, group.start).filter(line => line.trim() !== '')
     const near = before.slice(-3)
     const after = lines.slice(group.end + 1)
     const hasQuestion = [...near, ...after].some(line => /[?？]/.test(line))
+    const lead = before.slice(-1)
+    const isOffered = lead.some(line => OFFER.test(line)) && !lead.some(line => STEPS.test(line))
 
-    if (group.kind === 'digit' && !hasQuestion) continue
+    if (group.kind === 'digit' && !hasQuestion && !isOffered) continue
 
     const asked = [...near].reverse().find(line => /[?？]/.test(line))
 
@@ -147,4 +162,19 @@ export const parseQuestions = (answer: string): Item[] | null => {
   }
 
   return byId.size > 0 ? [...byId.values()] : null
+}
+
+const AFTER_MAX = 3
+
+// "1. 닫을까요?\n2. 열까요?" closing an answer: questions to answer one by
+// one, named as the answer numbered them. Every item must ask, and at most a
+// few lines may follow the list.
+export const parseNumbered = (answer: string): Item[] | null => {
+  const { lines, groups } = groupsOf(answer)
+  const group = groups[groups.length - 1]
+  if (group === undefined || group.kind !== 'digit') return null
+  if (lines.slice(group.end + 1).filter(line => line.trim() !== '').length > AFTER_MAX) return null
+  if (!group.choices.every(choice => /[?？]/.test(choice.label))) return null
+
+  return group.choices.map(choice => ({ id: `${choice.key}번`, title: titleOf(choice.label), suggestion: '', choices: [], pick: '' }))
 }

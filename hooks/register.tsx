@@ -14,7 +14,7 @@ import {
   summaryPrompt,
 } from './digest'
 import { layout } from './diagram'
-import { parseChoices, parseQuestions } from './parse'
+import { parseChoices, parseNumbered, parseQuestions } from './parse'
 import { cells, fit } from './width'
 
 const EMPTY_VIEW: View = {
@@ -370,7 +370,7 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     if (e.agentId !== undefined) return next(e)
 
-    const items = e.isAborted ? null : parseQuestions(e.answer)
+    const items = e.isAborted ? null : (parseQuestions(e.answer) ?? parseNumbered(e.answer))
     const parsed = e.isAborted || items ? null : parseChoices(e.answer)
     const fresh = { answers: {}, editing: '', sent: '', draft: '' }
     await update($, view, (v): View => {
