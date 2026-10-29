@@ -120,9 +120,19 @@ const send = async ($: EngineInterface, text: string) => {
   await $.prompt.submit({ text: trimmed, asUser: true })
 }
 
+// The answers with the open question's unsaved text kept as its own: what
+// the field shows is what the person means, unless they now answer that
+// same question another way (`except`).
+const kept = (v: View, except = ''): Record<string, string> => {
+  const text = v.draft.trim()
+  if (v.editing === '' || v.editing === except || text === '') return v.answers
+
+  return { ...v.answers, [v.editing]: text }
+}
+
 const answer = ($: EngineInterface, id: string, text: string) =>
   update($, view, (v): View => {
-    const answers = { ...v.answers }
+    const answers = { ...kept(v, id) }
     if (text.trim() === '') delete answers[id]
     else answers[id] = text.trim()
 
@@ -452,8 +462,10 @@ export const register: Register = on => {
     const hasChoices = v.phase === 'options' && (v.items.length > 0 || v.choices.length > 0)
 
     const questions = () => {
-      const answered = v.items.filter(item => v.answers[item.id] !== undefined).length
-      const canFill = v.items.every(item => v.answers[item.id] !== undefined || item.suggestion !== '')
+      // What a send would take: the open question's unsaved text counts.
+      const now: View = { ...v, answers: kept(v) }
+      const answered = v.items.filter(item => now.answers[item.id] !== undefined).length
+      const canFill = v.items.every(item => now.answers[item.id] !== undefined || item.suggestion !== '')
       const isComplete = answered === v.items.length
 
       return (
@@ -498,10 +510,12 @@ export const register: Register = on => {
                     dimColor
                     onPress={async () => {
                       await update($, view, (cur): View => {
-                        const old = cur.answers[item.id]
+                        if (cur.editing === item.id) return cur
+                        const answers = kept(cur, item.id)
+                        const old = answers[item.id]
                         const draft = old === undefined || old.startsWith(RECOMMEND) ? '' : old
 
-                        return { ...cur, editing: item.id, draft }
+                        return { ...cur, answers, editing: item.id, draft }
                       })
                       await focusOn($, `answer-${item.id}`)
                     }}
@@ -548,7 +562,7 @@ export const register: Register = on => {
                 key="send-all"
                 variant="primary"
                 label={answered === 0 ? '모두 추천대로 보내기' : '나머지는 추천대로 보내기'}
-                onPress={() => send($, compose(v, true, columns))}
+                onPress={() => send($, compose(now, true, columns))}
               />
             )}
             {answered > 0 && (
@@ -556,7 +570,7 @@ export const register: Register = on => {
                 key="send-picked"
                 variant="primary"
                 label={isComplete ? '보내기' : '고른 것만 보내기'}
-                onPress={() => send($, compose(v, false, columns))}
+                onPress={() => send($, compose(now, false, columns))}
               />
             )}
           </Box>

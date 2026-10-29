@@ -332,6 +332,45 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.unmount()
   })
 
+  test(`text left in a question's field becomes its answer on moving on (${surface})`, async ($, on) => {
+    const sent = host(on)
+    await answer($, ASKED)
+    const ui = await $.ui.mount({ ...PANE, surface })
+
+    // Typed, never Entered, then another question's ✎.
+    await ui.press({ key: 'edit-Q2' })
+    await ui.input({ key: 'answer-Q2', text: '합의 항목만', kind: 'change' })
+    await ui.press({ key: 'edit-Q1' })
+    expect((await ui.find({ type: 'Text', text: /^Q1 –  Q2/ }))?.text).toBe('Q1 –  Q2 ✎  Q3 –')
+    // Back again, it is still there.
+    await ui.press({ key: 'edit-Q2' })
+    expect((await ui.find({ key: 'answer-Q2' }))?.props.value).toBe('합의 항목만')
+
+    // Typed into Q1, then another question's option.
+    await ui.press({ key: 'edit-Q1' })
+    await ui.input({ key: 'answer-Q1', text: '새 브랜치로', kind: 'change' })
+    await ui.press({ key: 'pick-Q3-b' })
+    // Typed into Q1 again and sent without Enter.
+    await ui.press({ key: 'edit-Q1' })
+    await ui.input({ key: 'answer-Q1', text: '새 브랜치로 옮긴다', kind: 'change' })
+    await ui.press({ key: 'send-picked' })
+    expect(sent).toEqual([['Q1: 새 브랜치로 옮긴다', 'Q2: 합의 항목만', 'Q3: b) 로컬에만 둔다'].join('\n')])
+    await ui.unmount()
+  })
+
+  test(`an option of the open question wins over its unsaved text (${surface})`, async ($, on) => {
+    const sent = host(on)
+    await answer($, ASKED)
+    const ui = await $.ui.mount({ ...PANE, surface })
+
+    await ui.press({ key: 'edit-Q3' })
+    await ui.input({ key: 'answer-Q3', text: '둘 다', kind: 'change' })
+    await ui.press({ key: 'pick-Q3-a' })
+    await ui.press({ key: 'send-picked' })
+    expect(sent).toEqual(['Q3: a) EC2에 둔다'])
+    await ui.unmount()
+  })
+
   test(`the named option carries the mark and stands for the suggestion (${surface})`, async ($, on) => {
     const sent = host(on)
 
