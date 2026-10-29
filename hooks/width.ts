@@ -32,23 +32,41 @@ export const fit = (text: string, columns: number) => {
   return `${out}…`
 }
 
-// Text with what a terminal draws as nothing taken out: control and format
-// characters (zero-width ones, direction marks, the tag block), private-use
-// and unassigned code points. They would let words the person never saw ride
-// along with words they did. A zero-width joiner stays only between two
-// pictographs, where it joins an emoji such as 👩‍💻.
-const UNSEEN = /[\p{Cc}\p{Cf}\p{Co}\p{Cn}]/u
+// Text with what a terminal draws as nothing taken out, so no words the
+// person never saw ride along with words they did: control, format,
+// private-use and unassigned code points, every default-ignorable one (the
+// tag block, variation selectors, Hangul fillers) and the blank braille
+// cell. Combining marks stack two deep at most. Emoji stay whole: one
+// U+FE0F straight after a pictograph, and a zero-width joiner between an
+// emoji's parts (❤️‍🔥, 👩🏽‍💻).
+const HIDDEN = /[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Default_Ignorable_Code_Point}\u2800]/u
+const MARK = /\p{M}/u
 const PICTOGRAPH = /\p{Extended_Pictographic}/u
+const EMOJI_PART = /[\p{Extended_Pictographic}\p{Emoji_Modifier}\ufe0f]/u
+const MARKS_MAX = 2
 
 export const visible = (text: string) => {
   const chars = [...text]
+  let out = ''
+  let before = ''
+  let marks = 0
 
-  return chars
-    .filter((char, index) => {
-      if (!UNSEEN.test(char)) return true
-      const isJoiner = char === '\u200d'
+  chars.forEach((char, index) => {
+    const after = chars.at(index + 1) ?? ''
+    const isKept =
+      char === '\ufe0f'
+        ? PICTOGRAPH.test(before)
+        : char === '\u200d'
+          ? EMOJI_PART.test(before) && PICTOGRAPH.test(after)
+          : HIDDEN.test(char)
+            ? false
+            : !MARK.test(char) || marks < MARKS_MAX
+    if (!isKept) return
 
-      return isJoiner && PICTOGRAPH.test(chars.at(index - 1) ?? '') && PICTOGRAPH.test(chars.at(index + 1) ?? '')
-    })
-    .join('')
+    marks = MARK.test(char) ? marks + 1 : 0
+    out += char
+    before = char
+  })
+
+  return out
 }

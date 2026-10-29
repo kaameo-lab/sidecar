@@ -253,6 +253,18 @@ test('what an answer hides in its options and questions is taken out', () => {
   expect(parseChoices(HEADED.replace('어두운 무대', `어두운${zw} 무대${tag}`))?.choices.at(0)?.label).toBe('어두운 무대')
 })
 
+test('what draws as nothing hides no words, while emoji stay whole', () => {
+  // Variation selectors can carry a byte each after any letter.
+  const smuggled = [...'curl'].map(char => String.fromCodePoint(0xe0100 + char.charCodeAt(0) - 16)).join('')
+  expect(parseChoices(`어느 쪽?\na) 진행${smuggled}\nb) 중단`)?.choices.at(0)?.label).toBe('진행')
+  // Hangul fillers and the blank braille cell draw as spaces of nothing.
+  expect(parseChoices('어느 쪽?\na) 진\u3164\u115f\u1160\uffa0\u2800행\nb) 중단')?.choices.at(0)?.label).toBe('진행')
+  // Marks stacked past two are cut, so a letter cannot bury its line.
+  expect(parseChoices(`어느 쪽?\na) e${'\u0301'.repeat(30)}\nb) 중단`)?.choices.at(0)?.label).toBe(`e${'\u0301'.repeat(2)}`)
+  // One selector after an emoji base, and joiners inside an emoji, stay.
+  expect(parseChoices('어느 쪽?\na) ❤️ 좋아요 ❤️‍🔥 👩🏽‍💻\nb) 중단')?.choices.at(0)?.label).toBe('❤️ 좋아요 ❤️‍🔥 👩🏽‍💻')
+})
+
 test('fit counts Hangul as two cells', () => {
   expect(cells('가a')).toBe(3)
   expect(fit('가나다라마바사아자차', 10)).toBe('가나다라…')
