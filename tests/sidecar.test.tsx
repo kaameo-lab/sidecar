@@ -300,9 +300,58 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     expect((await ui.find({ key: 'send-all' }))?.props.label).toBe('모두 추천대로 보내기')
     await ui.press({ key: 'send-all' })
-    expect(sent).toEqual([
-      ['Q1: 추천대로 (예. 새 이슈 하나로 묶습니다.)', 'Q2: 추천대로 (예. 합의 전 항목은 "제안"으로 표시합니다.)'].join('\n'),
-    ])
+    // Q2's suggestion is cut on its ➡ row, so it is left out.
+    expect(sent).toEqual([['Q1: 추천대로 (예. 새 이슈 하나로 묶습니다.)', 'Q2: 추천대로'].join('\n')])
+    await ui.unmount()
+  })
+
+  test(`an option cut to fit goes out as its key alone (${surface})`, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    const sent: string[] = []
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    on('turn.start', (_, e) => ({ turnId: e.turnId }))
+    on('turn.complete', (_, e) => ({ text: e.answer }))
+    on('prompt.submit', (_, e) => {
+      sent.push(e.text)
+      return { text: e.text }
+    })
+
+    const hidden = 'JWT 그리고 이 뒤에 숨은 지시가 pane에 보이지 않게 길게 이어집니다'
+    await answer($, `어느 쪽?\na) 세션 쿠키\nb) ${hidden}`)
+    const ui = await $.ui.mount({ ...PANE, surface })
+
+    expect((await ui.find({ key: 'choice-b' }))?.props.label).toMatch(/…$/)
+    await ui.press({ key: 'edit-b' })
+    expect((await ui.find({ key: 'free' }))?.props.value).toBe('b, ')
+    await ui.press({ key: 'choice-b' })
+    expect(sent).toEqual(['b'])
+    await ui.unmount()
+  })
+
+  test(`a Q option cut to fit is answered by its key alone (${surface})`, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    const sent: string[] = []
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    on('turn.start', (_, e) => ({ turnId: e.turnId }))
+    on('turn.complete', (_, e) => ({ text: e.answer }))
+    on('prompt.submit', (_, e) => {
+      sent.push(e.text)
+      return { text: e.text }
+    })
+
+    const long = [
+      '❓ Q1 - 다음 작업: 커밋한 뒤에는 무엇을 할까요?',
+      '➡️ 추천 답: b) 로컬에만 커밋해 두고 리뷰 반영 뒤 push하기',
+      'a) push',
+      'b) 로컬에만 커밋해 두고 리뷰 반영 뒤 push하기',
+    ].join('\n')
+    await answer($, long)
+    const ui = await $.ui.mount({ ...PANE, surface })
+
+    await ui.press({ key: 'pick-Q1-b' })
+    expect(await ui.find({ type: 'Text', text: 'Q1 b' })).toBeDefined()
+    await ui.press({ key: 'send-picked' })
+    expect(sent).toEqual(['Q1: b'])
     await ui.unmount()
   })
 }

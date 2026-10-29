@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Entry, Folded, Item, Stats, Summary, View } from '../types'
+import type { Choice, Entry, Folded, Item, Stats, Summary, View } from '../types'
 import {
   baseName,
   clockTime,
@@ -53,6 +53,7 @@ const PLUGIN = 'sidecar'
 const PANE = 'sidecar'
 const TITLE = '대화'
 const RECOMMEND = '추천대로'
+const MARK = ' ✓추천'
 const SUMMARY_EVERY = 5
 const LOG_KEPT = 200
 const LOG_SHOWN = 30
@@ -60,20 +61,33 @@ const LOG_SHOWN = 30
 // The last answer of the main loop: a fork's transcript ends before it.
 let lastAnswer = ''
 
-// The answer "as recommended" sends: the option the suggestion names, else
-// the suggestion itself.
-const recommended = (item: Item) => {
-  const named = item.choices.find(choice => choice.key === item.pick)
+// A press goes out as the user's own words, so it sends only what the pane
+// showed whole in `room` cells: an option cut to fit goes out as its key, a
+// suggestion cut to fit is left out.
+const isWhole = (text: string, room: number) => fit(text, room) === text
 
-  return named ? `${named.key}) ${named.label}` : `${RECOMMEND} (${item.suggestion})`
+const said = (choice: Choice) => `${choice.key}) ${choice.label}`
+
+const pickLabel = (item: Item, choice: Choice) => `${said(choice)}${choice.key === item.pick ? MARK : ''}`
+
+const picked = (item: Item, choice: Choice, room: number) =>
+  isWhole(pickLabel(item, choice), room) ? said(choice) : choice.key
+
+// The answer "as recommended" sends: the option the suggestion names, else
+// the suggestion itself (shown on its ➡ row, four cells in).
+const recommended = (item: Item, room: number) => {
+  const named = item.choices.find(choice => choice.key === item.pick)
+  if (named) return picked(item, named, room)
+
+  return isWhole(item.suggestion, room - 4) ? `${RECOMMEND} (${item.suggestion})` : RECOMMEND
 }
 
 // One line per answered question; with `fillRest`, the unanswered ones that
 // carry a suggestion take it.
-const compose = (v: View, fillRest: boolean) =>
+const compose = (v: View, fillRest: boolean, room: number) =>
   v.items
     .flatMap(item => {
-      const given = v.answers[item.id] ?? (fillRest && item.suggestion !== '' ? recommended(item) : undefined)
+      const given = v.answers[item.id] ?? (fillRest && item.suggestion !== '' ? recommended(item, room) : undefined)
 
       return given === undefined ? [] : [`${item.id}: ${given}`]
     })
@@ -83,7 +97,7 @@ const mark = (item: Item, answer: string | undefined) => {
   if (answer === undefined) return '–'
   if (answer.startsWith(RECOMMEND)) return '✓'
 
-  return item.choices.find(choice => answer === `${choice.key}) ${choice.label}`)?.key ?? '✎'
+  return item.choices.find(choice => answer === said(choice) || answer === choice.key)?.key ?? '✎'
 }
 
 const send = async ($: EngineInterface, text: string) => {
@@ -272,9 +286,7 @@ export const register: Register = on => {
         <Box flexDirection="column">
           {v.items.map(item => {
             const given = v.answers[item.id]
-            const picks = item.choices.map(choice =>
-              fit(`${choice.key}) ${choice.label}${choice.key === item.pick ? ' ✓추천' : ''}`, columns),
-            )
+            const picks = item.choices.map(choice => fit(pickLabel(item, choice), columns))
             const hasOk = item.suggestion !== '' && item.pick === ''
 
             return (
@@ -287,14 +299,14 @@ export const register: Register = on => {
                     <Button
                       key={`pick-${item.id}-${choice.key}`}
                       label={picks[index]}
-                      onPress={() => answer($, item.id, `${choice.key}) ${choice.label}`)}
+                      onPress={() => answer($, item.id, picked(item, choice, columns))}
                     />
                   ))}
                   {hasOk && (
                     <Button
                       key={`ok-${item.id}`}
                       label={`✓ ${RECOMMEND}`}
-                      onPress={() => answer($, item.id, recommended(item))}
+                      onPress={() => answer($, item.id, recommended(item, columns))}
                     />
                   )}
                   <Button
@@ -330,14 +342,14 @@ export const register: Register = on => {
               <Button
                 key="send-all"
                 label={answered === 0 ? '모두 추천대로 보내기' : '나머지는 추천대로 보내기'}
-                onPress={() => send($, compose(v, true))}
+                onPress={() => send($, compose(v, true, columns))}
               />
             )}
             {answered > 0 && (
               <Button
                 key="send-picked"
                 label={isComplete ? '보내기' : '고른 것만 보내기'}
-                onPress={() => send($, compose(v, false))}
+                onPress={() => send($, compose(v, false, columns))}
               />
             )}
           </Box>
@@ -348,23 +360,25 @@ export const register: Register = on => {
     const letters = () => (
       <Box flexDirection="column">
         {v.question !== '' && <Text dimColor>Q. {v.question}</Text>}
-        {v.choices.map(choice => (
-          <Box flexDirection="row">
-            <Button
-              key={`choice-${choice.key}`}
-              hotkey={choice.key}
-              label={fit(`${choice.key}) ${choice.label}`, columns)}
-              onPress={() => send($, `${choice.key}) ${choice.label}`)}
-            />
-            <Button
-              key={`edit-${choice.key}`}
-              label="✎"
-              onPress={() =>
-                update($, view, cur => ({ ...cur, draft: `${choice.key}) ${choice.label}, ` }))
-              }
-            />
-          </Box>
-        ))}
+        {v.choices.map(choice => {
+          const words = isWhole(said(choice), columns) ? said(choice) : choice.key
+
+          return (
+            <Box flexDirection="row">
+              <Button
+                key={`choice-${choice.key}`}
+                hotkey={choice.key}
+                label={fit(said(choice), columns)}
+                onPress={() => send($, words)}
+              />
+              <Button
+                key={`edit-${choice.key}`}
+                label="✎"
+                onPress={() => update($, view, cur => ({ ...cur, draft: `${words}, ` }))}
+              />
+            </Box>
+          )
+        })}
         {Input && (
           <Input
             key="free"
