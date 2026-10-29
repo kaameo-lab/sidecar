@@ -786,25 +786,27 @@ test('the session saves its pane once more as it ends', async ($, on) => {
   expect((held.get('session:s1') as { shape?: string } | undefined)?.shape).toBe('log-1 summary-2 stats-2 folded-2')
 })
 
-test('a /clear saves the conversation it leaves and starts the pane empty', async ($, on) => {
-  mock.clock(on, { now: NOW })
-  on('turn.start', (_, e) => ({ turnId: e.turnId }))
-  on('turn.complete', (_, e) => ({ text: e.answer }))
-  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
-  on('ui.open', () => ({ value: { isPlaced: true } }))
-  const held = fakeStore(on, 's1')
+for (const reason of ['clear', 'resume'] as const) {
+  test(`a /${reason} saves the conversation it leaves and starts the pane empty`, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    on('turn.start', (_, e) => ({ turnId: e.turnId }))
+    on('turn.complete', (_, e) => ({ text: e.answer }))
+    on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    const held = fakeStore(on, 's1')
 
-  await answer($, GRILL)
-  await drain()
-  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+    await answer($, GRILL)
+    await drain()
+    await $.session.end({ reason, sessionId: 's1', resume: { id: 's1' } })
 
-  expect((held.get('session:s1') as { log: unknown[] } | undefined)?.log).toHaveLength(1)
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: '아직 기록이 없어요.' })).toBeDefined()
-  expect(await ui.find({ key: 'fold-choices' })).toBeUndefined()
-  expect((await ui.find({ key: 'fold-log' }))?.props.label).toMatch(/^▼ 로그 · 턴 0/)
-  await ui.unmount()
-})
+    expect((held.get('session:s1') as { log: unknown[] } | undefined)?.log).toHaveLength(1)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect(await ui.find({ type: 'Text', text: '아직 기록이 없어요.' })).toBeDefined()
+    expect(await ui.find({ key: 'fold-choices' })).toBeUndefined()
+    expect((await ui.find({ key: 'fold-log' }))?.props.label).toMatch(/^▼ 로그 · 턴 0/)
+    await ui.unmount()
+  })
+}
 
 // A session saved mid-turn, as the store holds it.
 const snapshot = (shape: string) => ({
@@ -816,6 +818,37 @@ const snapshot = (shape: string) => ({
   summary: { goal: '로그인 흐름 정리', decisions: [], open: [], nodes: [], edges: [], at: NOW, isBusy: true, error: '' },
   stats: { startedAt: NOW, turns: 2, sinceSummary: 0, files: ['/repo/login.ts'], base: 'base', untracked: [] },
   folded: { choices: false, summary: false, diagram: false, log: false, open: '' },
+})
+
+test('a restored session measures git from where it now starts', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  fakeStore(on, 's1', new Map([['session:s1', snapshot('log-1 summary-2 stats-2 folded-2')]]))
+  const ran = (stdout: string | null) => ({
+    value: { exitCode: stdout === null ? 128 : 0, stdout: stdout ?? '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+  })
+  on('process.run', (_, e) => {
+    const args = e.argv.slice(1).join(' ')
+    if (args === 'rev-parse --show-toplevel') return ran('/repo\n')
+    if (args.startsWith('ls-files')) return ran('')
+    if (args === 'stash create') return ran('fresh\n')
+    // The saved base would name what changed between the two sessions too.
+    if (args === 'diff --name-only --no-renames -z base') return ran('between.ts\0')
+    if (args === 'diff --name-only --no-renames -z fresh') return ran('')
+    return ran(null)
+  })
+
+  await $.session.start(START)
+  await turn($, 't3', '이어서', '이어 했어요')
+  await drain()
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  // What the session had listed stays; what changed between the sessions stays out.
+  expect(await ui.find({ type: 'Text', text: /^바뀐 파일  login\.ts$/ })).toBeDefined()
+  await ui.unmount()
 })
 
 test('a reload keeps the pane it holds over the saved one', async ($, on) => {

@@ -254,7 +254,9 @@ const save = async ($: EngineInterface, ending?: string) => {
 }
 
 // Draws a resumed session's pane again from what the store kept of it. A
-// turn still running when the process ended counts as stopped.
+// turn still running when the process ended counts as stopped. The files it
+// listed stay, but git is measured afresh from here, so what changed between
+// the two processes is not taken for this session's work.
 const restore = async ($: EngineInterface) => {
   const id = await $.session.id()
   const kept = await $.store.get(savedKey(id))
@@ -265,7 +267,7 @@ const restore = async ($: EngineInterface) => {
     saved.log.map(entry => (entry.status === 'working' ? { ...entry, status: 'stopped', gist: '중단됨' } : entry)),
   )
   await update($, summary, (): Summary => ({ ...saved.summary, isBusy: false }))
-  await update($, stats, (): Stats => saved.stats)
+  await update($, stats, (): Stats => ({ ...saved.stats, base: '', untracked: [] }))
   await update($, folded, (): Folded => saved.folded)
 }
 
@@ -306,12 +308,13 @@ export const register: Register = on => {
 
   // The last word on what the session leaves for a resume: gists that landed
   // after the last turn's save, folds changed since. Saved under the ending
-  // session's own id, whatever the process goes on as. A /clear goes on in
-  // this process under a new id with no session.start, so the pane starts
-  // over here; the next turn's sweep settles a fresh git base.
+  // session's own id, whatever the process goes on as. A /clear or a /resume
+  // goes on in this process under another id with no session.start, so the
+  // pane starts over here, lest the next save write this conversation under
+  // that id; the next turn's sweep settles a fresh git base.
   on('session.end', async ($, e, next) => {
     await save($, e.sessionId).catch(() => undefined)
-    if (e.reason === 'clear') await reset($)
+    if (e.reason === 'clear' || e.reason === 'resume') await reset($)
 
     return next(e)
   })
