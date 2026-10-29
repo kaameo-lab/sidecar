@@ -1,11 +1,14 @@
 // Prompts for the two summaries and the parsing of what comes back.
 
 import type { DiagramEdge, DiagramNode } from '../types'
+import { visible } from './width'
 
 const ANSWER_MAX = 6000
 const LINE_MAX = 80
 
-const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim()
+// One line of what a model or a person wrote, as the pane can draw it: a
+// control character (an escape sequence) makes the host refuse the pane whole.
+const oneLine = (text: string) => visible(text.replace(/\s+/g, ' ')).trim()
 
 const cap = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text)
 
@@ -68,7 +71,7 @@ export const parseGist = (reply: string) => {
   const gist = cap(oneLine(lines[0] ?? '').replace(/^[-•]\s*/, ''), LINE_MAX)
   const detail = lines
     .slice(1)
-    .map(line => `• ${cap(line.replace(/^[-•*]\s*/, ''), LINE_MAX)}`)
+    .map(line => `• ${cap(oneLine(line.replace(/^[-•*]\s*/, '')), LINE_MAX)}`)
     .slice(0, 3)
     .join('\n')
 

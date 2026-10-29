@@ -1072,6 +1072,42 @@ test('a file name that would break its row shows its odd characters as ?', async
   await ui.unmount()
 })
 
+test('what the models write is drawn without what draws as nothing', async ($, on) => {
+  host(on)
+  const tag = String.fromCodePoint(0xe0041)
+  // An escape sequence that would turn the terminal red, a direction override, a zero-width space.
+  const esc = '\u001b[31m'
+  on('model.complete', () => ({ value: { isAnswered: true as const, text: `선택지${esc} 정리${tag}\n- 상태\u200b 4가지\u202e`, usage: USAGE } }))
+  on('model.fork', () => ({
+    value: {
+      isAnswered: true as const,
+      text: JSON.stringify({
+        goal: `pane ${esc}다듬기${tag}`,
+        decisions: [`버튼은\u200b 세로`],
+        open: [`터미널\u3164 확인`],
+        nodes: [{ id: 'r', label: `register${tag}.tsx`, note: `훅\u202e 그리기`, status: 'changed' }],
+        edges: [],
+      }),
+      usage: USAGE,
+    },
+  }))
+
+  await turn($, 't1', '정리해', '정리했어요')
+  await drain()
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 80 } })
+  await ui.press({ key: 'refresh' })
+
+  expect(await ui.find({ type: 'Text', text: '목표  pane [31m다듬기' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '  • 버튼은 세로' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '  • 터미널 확인' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /↳ 선택지\[31m 정리$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /│ register\.tsx/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /│ 훅 그리기/ })).toBeDefined()
+  await ui.press({ key: 'entry-t1' })
+  expect(await ui.find({ type: 'Text', text: /• 상태 4가지$/ })).toBeDefined()
+  await ui.unmount()
+})
+
 test('a fork with nothing to read says so', async ($, on) => {
   mock.clock(on, { now: NOW })
   on('model.fork', () => ({ value: { isAnswered: false as const, reason: 'nothing-to-fork' as const } }))
