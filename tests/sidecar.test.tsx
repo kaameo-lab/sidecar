@@ -24,6 +24,52 @@ const PANE = {
   },
 } as const
 
+// What a stubbed model call reports it spent.
+const USAGE = {
+  input_tokens: 1,
+  output_tokens: 1,
+  cache_creation_input_tokens: 0,
+  cache_read_input_tokens: 0,
+}
+
+// The engine beneath the mod as most tests need it: a clock, turns that end
+// as asked, a pane that opens. Returns what the mod sent as the user's words.
+const host = (on: On) => {
+  mock.clock(on, { now: NOW })
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  const sent: string[] = []
+  on('prompt.submit', (_, e) => {
+    sent.push(e.text)
+    return { text: e.text }
+  })
+  return sent
+}
+
+// A session start the engine answers, the mod's command registered.
+const starts = (on: On) => {
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+}
+
+const START = { cwd: '/repo', surface: 'terminal', isInteractive: true } as const
+
+// One git run as process.run answers it: its output, or exit 128 for null.
+const ran = (stdout: string | null) => ({
+  value: { exitCode: stdout === null ? 128 : 0, stdout: stdout ?? '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+})
+
+// Lets hooks started without waiting run to their end.
+const drain = async () => {
+  for (let i = 0; i < 500; i += 1) await Promise.resolve()
+}
+
+const turn = async ($: Engine, turnId: string, text: string, said: string) => {
+  await $.turn.start({ text, turnId })
+  await $.turn.complete({ answer: said, durationMs: 1, isAborted: false, turnId, reason: 'answer' })
+}
+
 const GRILL = [
   '로그인 흐름을 먼저 정해야 해요.',
   '',
@@ -174,28 +220,12 @@ test('a Q line that asks nothing is no question', () => {
   expect(parseQuestions('Q1: 매출 12% 증가\nQ2: 매출 3% 감소')).toBeNull()
 })
 
-const answer = async ($: Engine, text: string) => {
-  await $.turn.start({ text: 'q', turnId: 't1' })
-  await $.turn.complete({
-    answer: text,
-    durationMs: 1,
-    isAborted: false,
-    turnId: 't1',
-    reason: 'answer',
-  })
-}
+// One turn whose answer is `text`.
+const answer = ($: Engine, text: string) => turn($, 't1', 'q', text)
 
 for (const surface of ['terminal', 'desktop'] as const) {
   test(`a press sends the choice as the user's words (${surface})`, async ($, on) => {
-  mock.clock(on, { now: NOW })
-    const sent: string[] = []
-    on('ui.open', () => ({ value: { isPlaced: true } }))
-    on('turn.start', (_, e) => ({ turnId: e.turnId }))
-    on('turn.complete', (_, e) => ({ text: e.answer }))
-    on('prompt.submit', (_, e) => {
-      sent.push(e.text)
-      return { text: e.text }
-    })
+    const sent = host(on)
 
     await answer($, GRILL)
     const ui = await $.ui.mount({ ...PANE, surface })
@@ -212,15 +242,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 
   test(`edit fills the field, Enter sends it (${surface})`, async ($, on) => {
-  mock.clock(on, { now: NOW })
-    const sent: string[] = []
-    on('ui.open', () => ({ value: { isPlaced: true } }))
-    on('turn.start', (_, e) => ({ turnId: e.turnId }))
-    on('turn.complete', (_, e) => ({ text: e.answer }))
-    on('prompt.submit', (_, e) => {
-      sent.push(e.text)
-      return { text: e.text }
-    })
+    const sent = host(on)
 
     await answer($, GRILL)
     const ui = await $.ui.mount({ ...PANE, surface })
@@ -236,15 +258,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 
   test(`Q answers are gathered and sent as one message (${surface})`, async ($, on) => {
-  mock.clock(on, { now: NOW })
-    const sent: string[] = []
-    on('ui.open', () => ({ value: { isPlaced: true } }))
-    on('turn.start', (_, e) => ({ turnId: e.turnId }))
-    on('turn.complete', (_, e) => ({ text: e.answer }))
-    on('prompt.submit', (_, e) => {
-      sent.push(e.text)
-      return { text: e.text }
-    })
+    const sent = host(on)
 
     await answer($, ASKED)
     const ui = await $.ui.mount({ ...PANE, surface })
@@ -269,15 +283,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 
   test(`the named option carries the mark and stands for the suggestion (${surface})`, async ($, on) => {
-  mock.clock(on, { now: NOW })
-    const sent: string[] = []
-    on('ui.open', () => ({ value: { isPlaced: true } }))
-    on('turn.start', (_, e) => ({ turnId: e.turnId }))
-    on('turn.complete', (_, e) => ({ text: e.answer }))
-    on('prompt.submit', (_, e) => {
-      sent.push(e.text)
-      return { text: e.text }
-    })
+    const sent = host(on)
 
     await answer($, NAMED)
     const ui = await $.ui.mount({ ...PANE, surface })
@@ -293,10 +299,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 
   test(`buttons always stack, short or long (${surface})`, async ($, on) => {
-  mock.clock(on, { now: NOW })
-    on('ui.open', () => ({ value: { isPlaced: true } }))
-    on('turn.start', (_, e) => ({ turnId: e.turnId }))
-    on('turn.complete', (_, e) => ({ text: e.answer }))
+    host(on)
 
     const long = [
       '❓ Q1 - 짧은 것: 고를까요?',
@@ -318,15 +321,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 
   test(`all-recommended sends every suggestion (${surface})`, async ($, on) => {
-  mock.clock(on, { now: NOW })
-    const sent: string[] = []
-    on('ui.open', () => ({ value: { isPlaced: true } }))
-    on('turn.start', (_, e) => ({ turnId: e.turnId }))
-    on('turn.complete', (_, e) => ({ text: e.answer }))
-    on('prompt.submit', (_, e) => {
-      sent.push(e.text)
-      return { text: e.text }
-    })
+    const sent = host(on)
 
     await answer($, ASKED.split('\n---\n\n❓ Q3')[0] ?? '')
     const ui = await $.ui.mount({ ...PANE, surface })
@@ -339,10 +334,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 
   test(`a long question is cut to the pane (${surface})`, async ($, on) => {
-    mock.clock(on, { now: NOW })
-    on('ui.open', () => ({ value: { isPlaced: true } }))
-    on('turn.start', (_, e) => ({ turnId: e.turnId }))
-    on('turn.complete', (_, e) => ({ text: e.answer }))
+    host(on)
 
     await answer($, '인증 흐름을 세션 쿠키로 갈지 JWT로 갈지, 아니면 OAuth만 둘지 정해야 하는데 어느 쪽으로 할까요?\na) 세션\nb) JWT')
     const ui = await $.ui.mount({ ...PANE, surface })
@@ -355,15 +347,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 
   test(`numbered questions are answered by their numbers (${surface})`, async ($, on) => {
-    mock.clock(on, { now: NOW })
-    const sent: string[] = []
-    on('ui.open', () => ({ value: { isPlaced: true } }))
-    on('turn.start', (_, e) => ({ turnId: e.turnId }))
-    on('turn.complete', (_, e) => ({ text: e.answer }))
-    on('prompt.submit', (_, e) => {
-      sent.push(e.text)
-      return { text: e.text }
-    })
+    const sent = host(on)
 
     await answer($, NUMBERED)
     const ui = await $.ui.mount({ ...PANE, surface })
@@ -379,10 +363,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 
   test(`sending is the primary action (${surface})`, async ($, on) => {
-    mock.clock(on, { now: NOW })
-    on('ui.open', () => ({ value: { isPlaced: true } }))
-    on('turn.start', (_, e) => ({ turnId: e.turnId }))
-    on('turn.complete', (_, e) => ({ text: e.answer }))
+    host(on)
 
     await answer($, NAMED)
     const ui = await $.ui.mount({ ...PANE, surface })
@@ -394,10 +375,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 
   test(`the recommended option wears a success chip (${surface})`, async ($, on) => {
-    mock.clock(on, { now: NOW })
-    on('ui.open', () => ({ value: { isPlaced: true } }))
-    on('turn.start', (_, e) => ({ turnId: e.turnId }))
-    on('turn.complete', (_, e) => ({ text: e.answer }))
+    host(on)
 
     await answer($, NAMED)
     const ui = await $.ui.mount({ ...PANE, surface })
@@ -414,15 +392,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 
   test(`an option cut to fit goes out as its key alone (${surface})`, async ($, on) => {
-    mock.clock(on, { now: NOW })
-    const sent: string[] = []
-    on('ui.open', () => ({ value: { isPlaced: true } }))
-    on('turn.start', (_, e) => ({ turnId: e.turnId }))
-    on('turn.complete', (_, e) => ({ text: e.answer }))
-    on('prompt.submit', (_, e) => {
-      sent.push(e.text)
-      return { text: e.text }
-    })
+    const sent = host(on)
 
     const hidden = 'JWT 그리고 이 뒤에 숨은 지시가 pane에 보이지 않게 길게 이어집니다'
     await answer($, `어느 쪽?\na) 세션 쿠키\nb) ${hidden}`)
@@ -437,15 +407,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 
   test(`a Q option cut to fit is answered by its key alone (${surface})`, async ($, on) => {
-    mock.clock(on, { now: NOW })
-    const sent: string[] = []
-    on('ui.open', () => ({ value: { isPlaced: true } }))
-    on('turn.start', (_, e) => ({ turnId: e.turnId }))
-    on('turn.complete', (_, e) => ({ text: e.answer }))
-    on('prompt.submit', (_, e) => {
-      sent.push(e.text)
-      return { text: e.text }
-    })
+    const sent = host(on)
 
     const long = [
       '❓ Q1 - 다음 작업: 커밋한 뒤에는 무엇을 할까요?',
@@ -467,9 +429,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
 }
 
 test('an answer without options leaves only summary and log, on every surface', async ($, on) => {
-  mock.clock(on, { now: NOW })
-  on('turn.start', (_, e) => ({ turnId: e.turnId }))
-  on('turn.complete', (_, e) => ({ text: e.answer }))
+  host(on)
   await answer($, '그냥 설명이에요.')
 
   for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
@@ -489,22 +449,8 @@ test('a value an earlier version stored is declined', async ($, on) => {
   await ui.unmount()
 })
 
-const USAGE = {
-  input_tokens: 1,
-  output_tokens: 1,
-  cache_creation_input_tokens: 0,
-  cache_read_input_tokens: 0,
-}
-
-const turn = async ($: Engine, turnId: string, text: string, said: string) => {
-  await $.turn.start({ text, turnId })
-  await $.turn.complete({ answer: said, durationMs: 1, isAborted: false, turnId, reason: 'answer' })
-}
-
 test('each turn becomes a log row with a small model’s gist', async ($, on) => {
-  mock.clock(on, { now: NOW })
-  on('turn.start', (_, e) => ({ turnId: e.turnId }))
-  on('turn.complete', (_, e) => ({ text: e.answer }))
+  host(on)
   on('model.complete', (_, e) => {
     expect(e.model).toBe('haiku')
     return { value: { isAnswered: true as const, text: '선택지 pane 구성안 제시\n- 상태 4가지\n- ✎ 편집', usage: USAGE } }
@@ -527,9 +473,7 @@ test('each turn becomes a log row with a small model’s gist', async ($, on) =>
 })
 
 test('without a model the gist is the answer’s first sentence', async ($, on) => {
-  mock.clock(on, { now: NOW })
-  on('turn.start', (_, e) => ({ turnId: e.turnId }))
-  on('turn.complete', (_, e) => ({ text: e.answer }))
+  host(on)
   on('model.complete', () => ({ value: { isAnswered: false as const, reason: 'empty-reply' as const, usage: USAGE } }))
 
   await turn($, 't1', '확인', '좋아요. 요약 갱신 버튼을 pane 위쪽에 붙였어요. 끝.')
@@ -583,36 +527,23 @@ test('the summary refreshes on the button and every fifth turn, with changed fil
   await ui.unmount()
 })
 
-// Lets hooks started without waiting run to their end.
-const drain = async () => {
-  for (let i = 0; i < 500; i += 1) await Promise.resolve()
-}
-
 // A stand-in git over `/repo`: the session starts from stash commit `base`;
 // `diff` and `others` are what it reports since then, NUL-separated.
 const fakeGit = (on: On, tree: { diff: string; others: string }) => {
-  const ran = (stdout: string, exitCode = 0) => ({
-    value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
-  })
   on('process.run', (_, e) => {
     const args = e.argv.slice(1).join(' ')
-    if (e.argv[0] !== 'git') return ran('', 127)
+    if (e.argv[0] !== 'git') return ran(null)
     if (args === 'rev-parse --show-toplevel') return ran('/repo\n')
     if (args === 'stash create') return ran('base\n')
     if (args === 'diff --name-only --no-renames -z base') return ran(tree.diff)
     if (args === 'ls-files --others --exclude-standard --full-name -z') return ran(tree.others)
-    return ran('', 128)
+    return ran(null)
   })
 }
 
-const START = { cwd: '/repo', surface: 'terminal', isInteractive: true } as const
-
 test('files changed outside the edit tools show once the turn ends', async ($, on) => {
-  mock.clock(on, { now: NOW })
-  on('turn.start', (_, e) => ({ turnId: e.turnId }))
-  on('turn.complete', (_, e) => ({ text: e.answer }))
-  on('session.start', (_, e) => ({ cwd: e.cwd }))
-  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  host(on)
+  starts(on)
   const tree = { diff: '', others: 'old.txt\0' }
   fakeGit(on, tree)
 
@@ -630,15 +561,9 @@ test('files changed outside the edit tools show once the turn ends', async ($, o
 })
 
 test('a repository with no commit yet is tracked from its first commit', async ($, on) => {
-  mock.clock(on, { now: NOW })
-  on('turn.start', (_, e) => ({ turnId: e.turnId }))
-  on('turn.complete', (_, e) => ({ text: e.answer }))
-  on('session.start', (_, e) => ({ cwd: e.cwd }))
-  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  host(on)
+  starts(on)
   const tree = { head: '', diff: '' }
-  const ran = (stdout: string | null) => ({
-    value: { exitCode: stdout === null ? 128 : 0, stdout: stdout ?? '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
-  })
   on('process.run', (_, e) => {
     const args = e.argv.slice(1).join(' ')
     if (args === 'rev-parse --show-toplevel') return ran('/repo\n')
@@ -662,18 +587,15 @@ test('a repository with no commit yet is tracked from its first commit', async (
   await ui.unmount()
 })
 
-for (const [why, answer] of [
-  ['git fails', { value: { exitCode: 128, stdout: '', stderr: 'not a git repository', isStdoutTruncated: false, isStderrTruncated: false } }],
+for (const [why, reply] of [
+  ['git fails', ran(null)],
   ['git is refused', { deny: 'no processes here' }],
 ] as const) {
   test(`when ${why} the edit tools alone name the changed files`, async ($, on) => {
-    mock.clock(on, { now: NOW })
-    on('turn.start', (_, e) => ({ turnId: e.turnId }))
-    on('turn.complete', (_, e) => ({ text: e.answer }))
-    on('session.start', (_, e) => ({ cwd: e.cwd }))
-    on('command.register', (_, e) => ({ value: { command: e.name } }))
+    host(on)
+    starts(on)
     on('tool.call', () => ({ result: {} }))
-    on('process.run', () => answer)
+    on('process.run', () => reply)
 
     await $.session.start(START)
     await $.tool.call({ tool: 'Edit', file_path: '/x/hooks/register.tsx', old_string: 'a', new_string: 'b' })
@@ -687,8 +609,7 @@ for (const [why, answer] of [
 
 test('a refresh first asks git what changed since the session began', async ($, on) => {
   mock.clock(on, { now: NOW })
-  on('session.start', (_, e) => ({ cwd: e.cwd }))
-  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  starts(on)
   const tree = { diff: '', others: '' }
   fakeGit(on, tree)
   let asked = ''
@@ -718,8 +639,7 @@ for (const [how, isInteractive, opens] of [
 ] as const) {
   test(`${how} ${opens ? 'opens' : 'leaves closed'} the pane at start`, async ($, on) => {
     mock.clock(on, { now: NOW })
-    on('session.start', (_, e) => ({ cwd: e.cwd }))
-    on('command.register', (_, e) => ({ value: { command: e.name } }))
+    starts(on)
     const titles: string[] = []
     on('ui.open', (_, e) => {
       titles.push(e.title ?? '')
@@ -748,9 +668,7 @@ const fakeStore = (on: On, id: string, held: Map<string, unknown> = new Map()) =
 }
 
 test('each main turn saves the pane under its session', async ($, on) => {
-  mock.clock(on, { now: NOW })
-  on('turn.start', (_, e) => ({ turnId: e.turnId }))
-  on('turn.complete', (_, e) => ({ text: e.answer }))
+  host(on)
   const held = fakeStore(on, 's1')
 
   await turn($, 't1', '로그인 고쳐', '고쳤어요')
@@ -762,9 +680,7 @@ test('each main turn saves the pane under its session', async ($, on) => {
 })
 
 test('only the latest twenty sessions are kept', async ($, on) => {
-  mock.clock(on, { now: NOW })
-  on('turn.start', (_, e) => ({ turnId: e.turnId }))
-  on('turn.complete', (_, e) => ({ text: e.answer }))
+  host(on)
   // Newest first, as the index keeps them.
   const ids = Array.from({ length: 20 }, (_, i) => `old${20 - i}`)
   const held = fakeStore(on, 'new', new Map<string, unknown>([['sessions', ids], ...ids.map(id => [`session:${id}`, {}] as const)]))
@@ -788,11 +704,8 @@ test('the session saves its pane once more as it ends', async ($, on) => {
 
 for (const reason of ['clear', 'resume'] as const) {
   test(`a /${reason} saves the conversation it leaves and starts the pane empty`, async ($, on) => {
-    mock.clock(on, { now: NOW })
-    on('turn.start', (_, e) => ({ turnId: e.turnId }))
-    on('turn.complete', (_, e) => ({ text: e.answer }))
+    host(on)
     on('session.end', (_, e) => ({ sessionId: e.sessionId }))
-    on('ui.open', () => ({ value: { isPlaced: true } }))
     const held = fakeStore(on, 's1')
 
     await answer($, GRILL)
@@ -821,15 +734,9 @@ const snapshot = (shape: string) => ({
 })
 
 test('a restored session measures git from where it now starts', async ($, on) => {
-  mock.clock(on, { now: NOW })
-  on('turn.start', (_, e) => ({ turnId: e.turnId }))
-  on('turn.complete', (_, e) => ({ text: e.answer }))
-  on('session.start', (_, e) => ({ cwd: e.cwd }))
-  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  host(on)
+  starts(on)
   fakeStore(on, 's1', new Map([['session:s1', snapshot('log-1 summary-2 stats-2 folded-2')]]))
-  const ran = (stdout: string | null) => ({
-    value: { exitCode: stdout === null ? 128 : 0, stdout: stdout ?? '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
-  })
   on('process.run', (_, e) => {
     const args = e.argv.slice(1).join(' ')
     if (args === 'rev-parse --show-toplevel') return ran('/repo\n')
@@ -853,8 +760,7 @@ test('a restored session measures git from where it now starts', async ($, on) =
 
 test('a reload keeps the pane it holds over the saved one', async ($, on) => {
   mock.clock(on, { now: NOW })
-  on('session.start', (_, e) => ({ cwd: e.cwd }))
-  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  starts(on)
   fakeStore(on, 's1', new Map([['session:s1', snapshot('log-1 summary-2 stats-2 folded-2')]]))
 
   await $.session.start(START)
@@ -873,8 +779,7 @@ for (const [how, shape, isBack] of [
 ] as const) {
   test(`a resumed session ${how}`, async ($, on) => {
     mock.clock(on, { now: NOW })
-    on('session.start', (_, e) => ({ cwd: e.cwd }))
-    on('command.register', (_, e) => ({ value: { command: e.name } }))
+    starts(on)
     fakeStore(on, 's1', new Map([['session:s1', snapshot(shape)]]))
 
     await $.session.start(START)
