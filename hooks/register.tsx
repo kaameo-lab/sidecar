@@ -62,6 +62,8 @@ const SUMMARY_EVERY = 5
 const LOG_KEPT = 200
 const LOG_SHOWN = 30
 const GIT_TIMEOUT_MS = 5000
+// Cells left blank down the pane's left edge.
+const MARGIN = 2
 
 // The last answer of the main loop: a fork's transcript ends before it.
 let lastAnswer = ''
@@ -415,8 +417,10 @@ export const register: Register = on => {
     const st = await read($, stats)
     const entries = await read($, log)
     const now = await $.clock.now()
-    const columns = (e.props.bodyColumns ?? 40) - 8
-    const rule = <Text dimColor>{'─'.repeat(Math.max(8, Math.min(columns + 8, 60)))}</Text>
+    // The cells the margin leaves; rules and the diagram span all of them.
+    const body = (e.props.bodyColumns ?? 40) - MARGIN
+    const columns = body + MARGIN - 8
+    const rule = <Text dimColor>{'─'.repeat(Math.max(8, body))}</Text>
     // A section's fold button: its name in the accent, what follows it dim.
     const heading = (part: Section, name: string, meta = '') => {
       const title = `${f[part] ? '▶' : '▼'} ${name}`
@@ -581,7 +585,7 @@ export const register: Register = on => {
     const shown = entries.slice(-LOG_SHOWN).reverse()
 
     return (
-      <Box flexDirection="column">
+      <Box key="pane" flexDirection="column" paddingLeft={MARGIN}>
         {hasChoices && (
           <Box flexDirection="column">
             {heading('choices', '선택지')}
@@ -628,7 +632,7 @@ export const register: Register = on => {
             {s.nodes.length === 0 && (
               <Text dimColor>{s.at > 0 ? '그릴 코드 작업이 아직 없어요.' : '요약을 갱신하면 함께 그려요.'}</Text>
             )}
-            {layout(s.nodes, s.edges, columns + 8).map(line => (
+            {layout(s.nodes, s.edges, body).map(line => (
               <Text>
                 {line.map(seg =>
                   seg.tone === undefined ? (

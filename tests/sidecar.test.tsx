@@ -626,6 +626,18 @@ test('a refresh first asks git what changed since the session began', async ($, 
   await ui.unmount()
 })
 
+for (const bodyColumns of [40, 100]) {
+  test(`the pane keeps a left margin and its rules reach the right edge (${bodyColumns} columns)`, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns } })
+    expect((await ui.find({ key: 'pane' }))?.props.paddingLeft).toBe(2)
+    const rule = (await ui.find({ type: 'Text', text: /^─+$/ }))?.text ?? ''
+    // The margin's two cells and the rule fill the body.
+    expect(cells(rule)).toBe(bodyColumns - 2)
+    await ui.unmount()
+  })
+}
+
 test('the refresh button stands apart from the summary heading', async ($, on) => {
   mock.clock(on, { now: NOW })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
