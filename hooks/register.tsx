@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Choice, Entry, Folded, Item, Stats, Summary, View } from '../types'
+import type { Choice, Entry, Folded, Item, Saved, Stats, Summary, View } from '../types'
 import {
   baseName,
   clockTime,
@@ -48,6 +48,10 @@ const log = atom({ plugin: 'sidecar', key: 'log' } as const, NO_ENTRIES, { shape
 const summary = atom({ plugin: 'sidecar', key: 'summary' } as const, EMPTY_SUMMARY, { shape: 'summary-2' })
 const stats = atom({ plugin: 'sidecar', key: 'stats' } as const, EMPTY_STATS, { shape: 'stats-2' })
 const folded = atom({ plugin: 'sidecar', key: 'folded' } as const, EMPTY_FOLDED, { shape: 'folded-2' })
+
+// The tags of the atoms a session's snapshot holds: change it with theirs.
+const SAVED_SHAPE = 'log-1 summary-2 stats-2 folded-2'
+const SESSIONS_KEPT = 20
 
 const PLUGIN = 'sidecar'
 const PANE = 'sidecar'
@@ -161,6 +165,7 @@ const refresh = async ($: EngineInterface) => {
   }
 
   await update($, summary, (s): Summary => ({ ...s, ...made, isBusy: false }))
+  await save($).catch(() => undefined)
 }
 
 const track = ($: EngineInterface, paths: string[]) =>
@@ -225,18 +230,72 @@ const sweep = async ($: EngineInterface) => {
   await track($, [...changed, ...found.others].filter(path => !untracked.includes(path)))
 }
 
+const savedKey = (id: string) => `session:${id}`
+
+// Keeps this session's pane in the store, which outlives the process, so a
+// resumed session draws it again; only the latest few sessions are kept, and
+// of each only the log rows the pane shows, so the store stays under its cap.
+const save = async ($: EngineInterface) => {
+  const id = await $.session.id()
+  const saved: Saved = {
+    shape: SAVED_SHAPE,
+    log: (await read($, log)).slice(-LOG_SHOWN),
+    summary: await read($, summary),
+    stats: await read($, stats),
+    folded: await read($, folded),
+  }
+  await $.store.set(savedKey(id), saved)
+
+  const held = await $.store.get('sessions')
+  const others = Array.isArray(held) ? held.filter((one): one is string => typeof one === 'string' && one !== id) : []
+  const order = [id, ...others]
+  await $.store.set('sessions', order.slice(0, SESSIONS_KEPT))
+  for (const old of order.slice(SESSIONS_KEPT)) await $.store.delete(savedKey(old))
+}
+
+// Draws a resumed session's pane again from what the store kept of it. A
+// turn still running when the process ended counts as stopped.
+const restore = async ($: EngineInterface) => {
+  const id = await $.session.id()
+  const kept = await $.store.get(savedKey(id))
+  if (typeof kept !== 'object' || kept === null || (kept as Partial<Saved>).shape !== SAVED_SHAPE) return
+
+  const saved = kept as Saved
+  await update($, log, (): Entry[] =>
+    saved.log.map(entry => (entry.status === 'working' ? { ...entry, status: 'stopped', gist: '중단됨' } : entry)),
+  )
+  await update($, summary, (): Summary => ({ ...saved.summary, isBusy: false }))
+  await update($, stats, (): Stats => saved.stats)
+  await update($, folded, (): Folded => saved.folded)
+}
+
+// What a turn leaves to run after it: the files git saw change, then the save.
+const afterTurn = async ($: EngineInterface) => {
+  await sweep($).catch(() => undefined)
+  await save($)
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'sidecar',
       description: 'Open the pane with the options, summary and log of this conversation',
     })
+    await restore($).catch(() => undefined)
     const now = await $.clock.now()
     await update($, stats, (s): Stats => (s.startedAt > 0 ? s : { ...s, startedAt: now }))
     await settle($)
     // A reload mid-refresh leaves nothing running.
     await update($, summary, (s): Summary => ({ ...s, isBusy: false }))
     if (e.isInteractive) void $.ui.open({ id: PANE, title: TITLE }).catch(() => undefined)
+
+    return next(e)
+  })
+
+  // The last word on what the session leaves for a resume: gists that landed
+  // after the last turn's save, folds changed since.
+  on('session.end', async ($, e, next) => {
+    await save($).catch(() => undefined)
 
     return next(e)
   })
@@ -320,8 +379,8 @@ export const register: Register = on => {
       void describe($, entry.id, entry.prompt, e.answer).catch(() => undefined)
     }
 
-    void sweep($).catch(() => undefined)
     const counted = await update($, stats, (s): Stats => ({ ...s, turns: s.turns + 1, sinceSummary: s.sinceSummary + 1 }))
+    void afterTurn($).catch(() => undefined)
     if (counted.sinceSummary >= SUMMARY_EVERY) void refresh($).catch(() => undefined)
 
     return next(e)

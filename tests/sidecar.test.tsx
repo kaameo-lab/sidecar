@@ -675,6 +675,101 @@ for (const [how, isInteractive, opens] of [
   })
 }
 
+// A stand-in for the plugin's own store, and the session id the engine gives.
+const fakeStore = (on: On, id: string, held: Map<string, unknown> = new Map()) => {
+  on('session.id', () => ({ value: id }))
+  on('store.get', (_, e) => ({ value: held.get(e.key) }))
+  on('store.set', (_, e) => {
+    held.set(e.key, e.value)
+    return { value: undefined }
+  })
+  on('store.delete', (_, e) => {
+    held.delete(e.key)
+    return { value: undefined }
+  })
+  on('store.keys', () => ({ value: [...held.keys()] }))
+  return held
+}
+
+test('each main turn saves the pane under its session', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  const held = fakeStore(on, 's1')
+
+  await turn($, 't1', '로그인 고쳐', '고쳤어요')
+  await drain()
+
+  const saved = held.get('session:s1') as { log: { prompt: string }[] } | undefined
+  expect(saved?.log.map(entry => entry.prompt)).toEqual(['로그인 고쳐'])
+  expect(held.get('sessions')).toEqual(['s1'])
+})
+
+test('only the latest twenty sessions are kept', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  // Newest first, as the index keeps them.
+  const ids = Array.from({ length: 20 }, (_, i) => `old${20 - i}`)
+  const held = fakeStore(on, 'new', new Map<string, unknown>([['sessions', ids], ...ids.map(id => [`session:${id}`, {}] as const)]))
+
+  await turn($, 't1', '하나', '답')
+  await drain()
+
+  expect(held.get('sessions')).toEqual(['new', ...ids.slice(0, 19)])
+  expect(held.has('session:old1')).toBe(false)
+  expect(held.has('session:old2')).toBe(true)
+})
+
+test('the session saves its pane once more as it ends', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  const held = fakeStore(on, 's1')
+
+  await $.session.end({ reason: 'prompt_input_exit', sessionId: 's1', resume: { id: 's1' } })
+  expect((held.get('session:s1') as { shape?: string } | undefined)?.shape).toBe('log-1 summary-2 stats-2 folded-2')
+})
+
+// A session saved mid-turn, as the store holds it.
+const snapshot = (shape: string) => ({
+  shape,
+  log: [
+    { id: 't1', at: NOW, prompt: '로그인 고쳐', gist: '로그인 수정', detail: '', status: 'done' },
+    { id: 't2', at: NOW, prompt: '테스트 돌려', gist: '', detail: '', status: 'working' },
+  ],
+  summary: { goal: '로그인 흐름 정리', decisions: [], open: [], nodes: [], edges: [], at: NOW, isBusy: true, error: '' },
+  stats: { startedAt: NOW, turns: 2, sinceSummary: 0, files: ['/repo/login.ts'], base: 'base', untracked: [] },
+  folded: { choices: false, summary: false, diagram: false, log: false, open: '' },
+})
+
+for (const [how, shape, isBack] of [
+  ['gets its pane back', 'log-1 summary-2 stats-2 folded-2', true],
+  ['saved by an older version starts empty', 'log-1 summary-1 stats-1 folded-2', false],
+] as const) {
+  test(`a resumed session ${how}`, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    on('session.start', (_, e) => ({ cwd: e.cwd }))
+    on('command.register', (_, e) => ({ value: { command: e.name } }))
+    fakeStore(on, 's1', new Map([['session:s1', snapshot(shape)]]))
+
+    await $.session.start(START)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    const goal = await ui.find({ type: 'Text', text: '목표  로그인 흐름 정리' })
+    const done = await ui.find({ type: 'Text', text: /↳ 로그인 수정/ })
+    if (isBack) {
+      expect(goal).toBeDefined()
+      expect(done).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: '바뀐 파일  login.ts' })).toBeDefined()
+      // The turn the process died in did not finish.
+      expect(await ui.find({ type: 'Text', text: /↳ 중단됨/ })).toBeDefined()
+    } else {
+      expect(goal).toBeUndefined()
+      expect(done).toBeUndefined()
+    }
+    await ui.unmount()
+  })
+}
+
 test('a fork with nothing to read says so', async ($, on) => {
   mock.clock(on, { now: NOW })
   on('model.fork', () => ({ value: { isAnswered: false as const, reason: 'nothing-to-fork' as const } }))

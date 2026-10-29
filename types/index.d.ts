@@ -76,6 +76,17 @@ export type Folded = {
   open: string
 }
 
+// What the store keeps of one session so a resumed one draws its pane
+// again: every atom but the options, which must not come back stale.
+export type Saved = {
+  // The four atoms' shape tags when it was saved.
+  shape: string
+  log: Entry[]
+  summary: Summary
+  stats: Stats
+  folded: Folded
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'sidecar': {
