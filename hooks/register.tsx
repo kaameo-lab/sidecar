@@ -540,13 +540,27 @@ export const register: Register = on => {
               </Box>
             )
           })}
+          {/* The send area: what goes out, how far the answers are, a note, the buttons. */}
+          <Text dimColor>
+            {'╌'.repeat(Math.max(8, body))}
+          </Text>
+          {preview !== '' && (
+            // Framed by the surface: characters drawn as a frame in each row drift.
+            <Box key="preview" flexDirection="column" borderStyle="round" borderDimColor paddingX={1}>
+              {preview.split('\n').map(line => (
+                <Text dimColor>
+                  {line === '' ? ' ' : fit(line, columns)}
+                </Text>
+              ))}
+            </Box>
+          )}
           <Text>
             {v.items.map((item, index) => {
-              const isOpen = v.answers[item.id] === undefined
+              const isOpen = now.answers[item.id] === undefined
 
               return (
                 <Text color={isOpen ? undefined : 'success'} dimColor={isOpen}>
-                  {`${index > 0 ? '  ' : ''}${item.id} ${mark(item, v.answers[item.id])}`}
+                  {`${index > 0 ? '  ' : ''}${item.id} ${mark(item, now.answers[item.id])}`}
                 </Text>
               )
             })}
@@ -560,13 +574,6 @@ export const register: Register = on => {
               onInput={value => update($, view, cur => ({ ...cur, note: value }))}
               onSubmit={value => send($, withNote(compose(now, false, columns), value))}
             />
-          )}
-          {preview !== '' && (
-            <Box key="preview" flexDirection="column">
-              {preview.split('\n').map(line => (
-                <Text dimColor>{line === '' ? '  │' : `  │ ${fit(line, columns)}`}</Text>
-              ))}
-            </Box>
           )}
           <Box flexDirection="row">
             {canFill && !isComplete && (

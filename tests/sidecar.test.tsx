@@ -407,7 +407,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.unmount()
   })
 
-  test(`what a send would say shows above the button (${surface})`, async ($, on) => {
+  test(`under the last question, the send area: rule, preview, marks, note, buttons (${surface})`, async ($, on) => {
     host(on)
     await answer($, ASKED)
     const ui = await $.ui.mount({ ...PANE, surface })
@@ -415,10 +415,25 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await ui.find({ key: 'preview' })).toBeUndefined()
     await ui.press({ key: 'pick-Q3-b' })
     await ui.input({ key: 'free', text: '테스트도', kind: 'change' })
-    const lines = (await ui.findAll({ type: 'Text', text: /^  │/ })).map(text => text.text)
-    expect(lines).toEqual(['  │ Q3: b) 로컬에만 둔다', '  │', '  │ 테스트도'])
-    const keys = (await ui.findAll({})).map(element => element.key)
-    expect(keys.indexOf('preview')).toBeLessThan(keys.indexOf('send-picked'))
+    const preview = await ui.find({ key: 'preview' })
+    const lines = (preview?.children ?? []).map(row => ((row as { children?: unknown[] }).children ?? []).join(''))
+    expect(lines).toEqual(['Q3: b) 로컬에만 둔다', ' ', '테스트도'])
+    // The preview is framed by the surface, not by characters drawn in its rows.
+    expect(preview?.props.borderStyle).toBe('round')
+
+    // A Text keeps no key, so the rule and the marks are found by what they say.
+    const drawn = await ui.findAll({})
+    const at = (is: (element: (typeof drawn)[number]) => boolean) => drawn.findIndex(is)
+    const order = [
+      at(element => element.key === 'edit-Q3'),
+      at(element => element.type === 'Text' && /^╌+$/.test(element.text)),
+      at(element => element.key === 'preview'),
+      at(element => element.type === 'Text' && element.text.startsWith('Q1 –  Q2 –  Q3 b')),
+      at(element => element.key === 'free'),
+      at(element => element.key === 'send-picked'),
+    ]
+    expect(order.every(at => at >= 0)).toBe(true)
+    expect([...order].sort((a, b) => a - b)).toEqual(order)
     await ui.unmount()
   })
 
