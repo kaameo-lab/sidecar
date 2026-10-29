@@ -1,4 +1,5 @@
 import type { Choice, Item } from '../types'
+import { visible } from './width'
 
 export type Parsed = { question: string; choices: Choice[] }
 
@@ -17,11 +18,14 @@ const OFFER =
   /중에서|중 하나|둘 중|(?:두|세|네) 가지 (?:방법|안|선택지)|방법은 (?:두|세|네) 가지|골라|고르시|추천(?:합니다|드립니다|해요)[.:]?\s*$/
 const STEPS = /진행 순서|진행 방식|다음 액션|할 일/
 
+// Everything taken out of an answer passes here: what it holds goes on a
+// button and out as the person's words, so it keeps only what is drawn.
 const clean = (text: string) => {
-  const plain = text
-    .replace(/\*\*|__|`/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
+  const plain = visible(
+    text
+      .replace(/\*\*|__|`/g, '')
+      .replace(/\s+/g, ' '),
+  ).trim()
 
   return plain.length > LABEL_MAX ? `${plain.slice(0, LABEL_MAX - 1)}…` : plain
 }

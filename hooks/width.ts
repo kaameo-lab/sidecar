@@ -31,3 +31,24 @@ export const fit = (text: string, columns: number) => {
 
   return `${out}…`
 }
+
+// Text with what a terminal draws as nothing taken out: control and format
+// characters (zero-width ones, direction marks, the tag block), private-use
+// and unassigned code points. They would let words the person never saw ride
+// along with words they did. A zero-width joiner stays only between two
+// pictographs, where it joins an emoji such as 👩‍💻.
+const UNSEEN = /[\p{Cc}\p{Cf}\p{Co}\p{Cn}]/u
+const PICTOGRAPH = /\p{Extended_Pictographic}/u
+
+export const visible = (text: string) => {
+  const chars = [...text]
+
+  return chars
+    .filter((char, index) => {
+      if (!UNSEEN.test(char)) return true
+      const isJoiner = char === '\u200d'
+
+      return isJoiner && PICTOGRAPH.test(chars.at(index - 1) ?? '') && PICTOGRAPH.test(chars.at(index + 1) ?? '')
+    })
+    .join('')
+}
