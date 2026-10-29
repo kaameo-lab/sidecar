@@ -461,7 +461,8 @@ test('each turn becomes a log row with a small model’s gist', async ($, on) =>
   // Newest first.
   const rows = await ui.findAll({ type: 'Button', text: /나  / })
   expect(rows.map(row => row.props.label)).toEqual([expect.stringMatching(/나  다 고쳐$/), expect.stringMatching(/나  1번 선택지 버튼$/)])
-  expect(await ui.find({ type: 'Text', text: /↳ 선택지 pane 구성안 제시/ })).toBeDefined()
+  // The gist is what the row is for, so it is drawn at full strength.
+  expect((await ui.find({ type: 'Text', text: /↳ 선택지 pane 구성안 제시/ }))?.props.dimColor).toBeFalsy()
 
   expect(await ui.find({ type: 'Text', text: /• 상태 4가지/ })).toBeUndefined()
   await ui.press({ key: 'entry-t1' })
@@ -509,7 +510,9 @@ test('the summary refreshes on the button and every fifth turn, with changed fil
   expect(forks).toBe(1)
   expect(await ui.find({ type: 'Text', text: '목표  선택지 mod 다듬기' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '  • Q 버튼은 세로' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: '  • 터미널 확인' })).toBeDefined()
+  // What is left stands out; what was decided does not.
+  expect((await ui.find({ type: 'Text', text: '  • 터미널 확인' }))?.props.color).toBe('warning')
+  expect((await ui.find({ type: 'Text', text: '  • Q 버튼은 세로' }))?.props.color).toBeUndefined()
   expect((await ui.find({ key: 'fold-summary' }))?.props.label).toMatch(/^▼ 요약 · \d\d:\d\d 갱신$/)
 
   for (const id of ['t1', 't2', 't3', 't4']) await turn($, id, id, '답')

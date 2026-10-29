@@ -15,7 +15,7 @@ import {
 } from './digest'
 import { layout } from './diagram'
 import { parseChoices, parseQuestions } from './parse'
-import { fit } from './width'
+import { cells, fit } from './width'
 
 const EMPTY_VIEW: View = {
   phase: 'none',
@@ -521,16 +521,24 @@ export const register: Register = on => {
         </Box>
         {!f.summary && (
           <Box flexDirection="column">
-            {s.error !== '' && <Text dimColor>{s.error}</Text>}
+            {s.error !== '' && <Text color="error">{s.error}</Text>}
             {s.at === 0 && !s.isBusy && s.error === '' && (
               <Text dimColor>아직 요약이 없어요. {SUMMARY_EVERY}턴마다 만들거나 ↻ 갱신으로 바로 만들어요.</Text>
             )}
-            {s.at > 0 && <Text>목표  {fit(s.goal, columns - 2)}</Text>}
-            {s.at > 0 && s.decisions.length > 0 && <Text>결정</Text>}
+            {s.at > 0 && (
+              <Text>
+                <Text bold>목표</Text>  {fit(s.goal, columns - 2)}
+              </Text>
+            )}
+            {s.at > 0 && s.decisions.length > 0 && <Text bold>결정</Text>}
             {s.at > 0 && s.decisions.map(item => <Text>  • {fit(item, columns - 4)}</Text>)}
-            {files.length > 0 && <Text>바뀐 파일  {fit(files.join(', '), columns - 6)}</Text>}
-            {s.at > 0 && s.open.length > 0 && <Text>남은 일</Text>}
-            {s.at > 0 && s.open.map(item => <Text>  • {fit(item, columns - 4)}</Text>)}
+            {files.length > 0 && (
+              <Text>
+                <Text bold>바뀐 파일</Text>  <Text dimColor>{fit(files.join(', '), columns - 6)}</Text>
+              </Text>
+            )}
+            {s.at > 0 && s.open.length > 0 && <Text bold>남은 일</Text>}
+            {s.at > 0 && s.open.map(item => <Text color="warning">  • {fit(item, columns - 4)}</Text>)}
           </Box>
         )}
         {rule}
@@ -570,23 +578,33 @@ export const register: Register = on => {
             {shown.map(entry => {
               const isWorking = entry.status === 'working'
               const gist = entry.gist !== '' ? entry.gist : isWorking ? '답변 중…' : '요약하는 중…'
+              const dot = isWorking ? '● ' : ''
+              const time = `${clockTime(entry.at)} `
+              const asked = fit(`나  ${entry.prompt}`, columns + 4 - cells(dot + time))
 
               return (
                 <Box flexDirection="column">
                   <Button
                     key={`entry-${entry.id}`}
                     plain
-                    label={fit(`${isWorking ? '● ' : ''}${clockTime(entry.at)} 나  ${entry.prompt}`, columns + 4)}
+                    label={`${dot}${time}${asked}`}
                     onPress={() =>
                       update($, folded, (cur): Folded => ({ ...cur, open: cur.open === entry.id ? '' : entry.id }))
                     }
-                  />
-                  <Text dimColor>      ↳ {fit(gist, columns - 4)}</Text>
+                  >
+                    {dot !== '' && <Text color="warning">{dot}</Text>}
+                    <Text dimColor>{time}</Text>
+                    {asked}
+                  </Button>
+                  <Text>
+                    <Text dimColor>      ↳ </Text>
+                    <Text color={entry.status === 'stopped' ? 'warning' : undefined}>{fit(gist, columns - 4)}</Text>
+                  </Text>
                   {f.open === entry.id &&
                     entry.detail
                       .split('\n')
                       .filter(line => line !== '')
-                      .map(line => <Text>        {fit(line, columns - 6)}</Text>)}
+                      .map(line => <Text dimColor>        {fit(line, columns - 6)}</Text>)}
                 </Box>
               )
             })}
