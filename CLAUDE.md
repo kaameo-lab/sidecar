@@ -27,8 +27,9 @@ claude plugin validate .    # checks .claude-plugin/plugin.json and hooks/hooks.
 - `hooks/hooks.json` names a single module, `hooks/register.tsx`, which exports `register: Register`. Everything is wired there with `on(event, [filter], handler)`. Handlers are middleware: they call `next(e)` and return its result.
 - **State** is held in five `atom`s (`view`, `log`, `summary`, `stats`, `folded`) and read/written with `read($, atom)` and `update($, atom, fn)`. Their types live in `types/index.d.ts`, which also adds them to `PluginState` in the `claude-code` module. Each atom has a `shape` tag such as `'view-3'`. **Bump the tag whenever you change that type's fields.** Stored state survives a reload, and the tag is what makes the mod decline a value an older version stored.
 - **Event flow**:
+  - `session.start`: records where git's work tree stood (`git stash create`, else HEAD) as `stats.base`, and the files git didn't track then as `stats.untracked`.
   - `turn.start`: adds a log entry, but only for the main loop (`e.agentId === undefined`).
-  - `turn.complete`: parses the answer with `parseQuestions` first and falls back to `parseChoices`. It sets `view.phase`, opens the pane when options were found, starts `describe` (Haiku gist via `$.model.complete`) without waiting for it, and every `SUMMARY_EVERY` turns starts `refresh` (`$.model.fork` with a JSON summary prompt) the same way.
+  - `turn.complete`: parses the answer with `parseQuestions` first and falls back to `parseChoices`. It sets `view.phase`, opens the pane when options were found, adds what git sees changed since `stats.base` to `stats.files` (`sweep`, which `refresh` also runs first), starts `describe` (Haiku gist via `$.model.complete`) without waiting for it, and every `SUMMARY_EVERY` turns starts `refresh` (`$.model.fork` with a JSON summary prompt) the same way.
   - `tool.call` for Edit, Write and NotebookEdit: records the changed paths in `stats.files`.
   - `prompt.submit`: separates the plugin's own submissions (`origin.kind === 'plugin'`) from the user's typing.
   - `ui.render` (`component: 'Pane'`): draws the whole pane from atom state every time. Components come from `$.ui.resolve(e)`, and `Input` is optional because some surfaces don't have it.
@@ -41,7 +42,7 @@ claude plugin validate .    # checks .claude-plugin/plugin.json and hooks/hooks.
 
 ## Tests
 
-Tests use `test`, `expect` and `mock` from `claude-code/testing`. An engine test gets `($, on)`. It stubs host events with `on('turn.complete' | 'model.complete' | 'model.fork' | 'ui.open' | …, handler)`, drives turns through `$.turn.start` and `$.turn.complete`, and mounts the pane with `$.ui.mount({ ...PANE, surface })`. Buttons are found and pressed by their React `key` (`choice-b`, `pick-Q3-a`, `send-all`, `refresh`, …), so a key rename breaks tests. UI tests run once per surface (`terminal`, `desktop`).
+Tests use `test`, `expect` and `mock` from `claude-code/testing`. An engine test gets `($, on)`. It stubs host events with `on('turn.complete' | 'model.complete' | 'model.fork' | 'ui.open' | …, handler)`. A stub for a call on `$` (`process.run`, `command.register`, `model.fork`, …) answers `{ value: … }`; one that answers otherwise makes the plugin's hook skip silently. Tests drive turns through `$.turn.start` and `$.turn.complete`, and mount the pane with `$.ui.mount({ ...PANE, surface })`. Buttons are found and pressed by their React `key` (`choice-b`, `pick-Q3-a`, `send-all`, `refresh`, …), so a key rename breaks tests. UI tests run once per surface (`terminal`, `desktop`).
 
 ## Agent skills
 

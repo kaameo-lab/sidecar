@@ -57,8 +57,14 @@ export type Stats = {
   turns: number
   // Turns since the summary was last refreshed.
   sinceSummary: number
-  // Absolute paths Edit, Write and NotebookEdit changed, first change first.
+  // Absolute paths Edit, Write and NotebookEdit changed, or git found changed
+  // since `base`, first change first.
   files: string[]
+  // The commit git compares the work tree with: the tree as the session found
+  // it, or '' outside a repository.
+  base: string
+  // Absolute paths git did not track when the session began.
+  untracked: string[]
 }
 
 export type Folded = {

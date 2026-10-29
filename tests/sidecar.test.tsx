@@ -1,4 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
+import type { On } from 'claude-code'
 import type { Engine } from 'claude-code/testing'
 
 import { parseChoices, parseQuestions } from '../hooks/parse'
@@ -499,11 +500,94 @@ test('the summary refreshes on the button and every fifth turn, with changed fil
   expect(forks).toBe(1)
   await turn($, 't5', 't5', '답')
   // The fifth turn's refresh runs after its hook returns.
-  for (let i = 0; i < 50; i += 1) await Promise.resolve()
+  for (let i = 0; i < 500 && forks < 2; i += 1) await Promise.resolve()
   expect(forks).toBe(2)
 
   await ui.press({ key: 'fold-summary' })
   expect(await ui.find({ type: 'Text', text: /^목표/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+// A stand-in git over `/repo`: the session starts from stash commit `base`;
+// `diff` and `others` are what it reports since then, NUL-separated.
+const fakeGit = (on: On, tree: { diff: string; others: string }) => {
+  const ran = (stdout: string, exitCode = 0) => ({
+    value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+  })
+  on('process.run', (_, e) => {
+    const args = e.argv.slice(1).join(' ')
+    if (e.argv[0] !== 'git') return ran('', 127)
+    if (args === 'rev-parse --show-toplevel') return ran('/repo\n')
+    if (args === 'stash create') return ran('base\n')
+    if (args === 'diff --name-only --no-renames -z base') return ran(tree.diff)
+    if (args === 'ls-files --others --exclude-standard --full-name -z') return ran(tree.others)
+    return ran('', 128)
+  })
+}
+
+const START = { cwd: '/repo', surface: 'terminal', isInteractive: true } as const
+
+test('files changed outside the edit tools show once the turn ends', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  const tree = { diff: '', others: 'old.txt\0' }
+  fakeGit(on, tree)
+
+  await $.session.start(START)
+  // old.txt was added to the index since, so the diff names it too.
+  tree.diff = 'hooks/register.tsx\0old.txt\0'
+  tree.others = 'notes.md\0'
+  await turn($, 't1', '고쳐', '고쳤어요')
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  // old.txt was there before the session began.
+  expect(await ui.find({ type: 'Text', text: '바뀐 파일  register.tsx, notes.md' })).toBeDefined()
+  await ui.unmount()
+})
+
+for (const [why, answer] of [
+  ['git fails', { value: { exitCode: 128, stdout: '', stderr: 'not a git repository', isStdoutTruncated: false, isStderrTruncated: false } }],
+  ['git is refused', { deny: 'no processes here' }],
+] as const) {
+  test(`when ${why} the edit tools alone name the changed files`, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    on('turn.start', (_, e) => ({ turnId: e.turnId }))
+    on('turn.complete', (_, e) => ({ text: e.answer }))
+    on('session.start', (_, e) => ({ cwd: e.cwd }))
+    on('command.register', (_, e) => ({ value: { command: e.name } }))
+    on('tool.call', () => ({ result: {} }))
+    on('process.run', () => answer)
+
+    await $.session.start(START)
+    await $.tool.call({ tool: 'Edit', file_path: '/x/hooks/register.tsx', old_string: 'a', new_string: 'b' })
+    await turn($, 't1', '고쳐', '고쳤어요')
+
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    expect(await ui.find({ type: 'Text', text: '바뀐 파일  register.tsx' })).toBeDefined()
+    await ui.unmount()
+  })
+}
+
+test('a refresh first asks git what changed since the session began', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  const tree = { diff: '', others: '' }
+  fakeGit(on, tree)
+  let asked = ''
+  on('model.fork', (_, e) => {
+    asked = e.prompt
+    return { value: { isAnswered: false as const, reason: 'nothing-to-fork' as const } }
+  })
+
+  await $.session.start(START)
+  tree.diff = 'late.ts\0'
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'refresh' })
+  expect(asked).toContain('- /repo/late.ts')
   await ui.unmount()
 })
 

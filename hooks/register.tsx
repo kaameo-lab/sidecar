@@ -38,7 +38,7 @@ const EMPTY_SUMMARY: Summary = {
   isBusy: false,
   error: '',
 }
-const EMPTY_STATS: Stats = { startedAt: 0, turns: 0, sinceSummary: 0, files: [] }
+const EMPTY_STATS: Stats = { startedAt: 0, turns: 0, sinceSummary: 0, files: [], base: '', untracked: [] }
 const EMPTY_FOLDED: Folded = { choices: false, summary: false, diagram: false, log: false, open: '' }
 
 // Change a tag when its type's fields change: it declines what an earlier
@@ -46,7 +46,7 @@ const EMPTY_FOLDED: Folded = { choices: false, summary: false, diagram: false, l
 const view = atom({ plugin: 'sidecar', key: 'view' } as const, EMPTY_VIEW, { shape: 'view-3' })
 const log = atom({ plugin: 'sidecar', key: 'log' } as const, NO_ENTRIES, { shape: 'log-1' })
 const summary = atom({ plugin: 'sidecar', key: 'summary' } as const, EMPTY_SUMMARY, { shape: 'summary-2' })
-const stats = atom({ plugin: 'sidecar', key: 'stats' } as const, EMPTY_STATS, { shape: 'stats-1' })
+const stats = atom({ plugin: 'sidecar', key: 'stats' } as const, EMPTY_STATS, { shape: 'stats-2' })
 const folded = atom({ plugin: 'sidecar', key: 'folded' } as const, EMPTY_FOLDED, { shape: 'folded-2' })
 
 const PLUGIN = 'sidecar'
@@ -57,6 +57,7 @@ const MARK = ' ✓추천'
 const SUMMARY_EVERY = 5
 const LOG_KEPT = 200
 const LOG_SHOWN = 30
+const GIT_TIMEOUT_MS = 5000
 
 // The last answer of the main loop: a fork's transcript ends before it.
 let lastAnswer = ''
@@ -143,6 +144,7 @@ const refresh = async ($: EngineInterface) => {
 
   await update($, summary, (s): Summary => ({ ...s, isBusy: true, error: '' }))
   await update($, stats, (s): Stats => ({ ...s, sinceSummary: 0 }))
+  await sweep($)
 
   const { files } = await read($, stats)
   let made: Partial<Summary> = { error: '요약하지 못했어요.' }
@@ -161,8 +163,65 @@ const refresh = async ($: EngineInterface) => {
   await update($, summary, (s): Summary => ({ ...s, ...made, isBusy: false }))
 }
 
-const track = ($: EngineInterface, path: string) =>
-  update($, stats, (s): Stats => (s.files.includes(path) ? s : { ...s, files: [...s.files, path] }))
+const track = ($: EngineInterface, paths: string[]) =>
+  update($, stats, (s): Stats => {
+    const added = paths.filter((path, index) => !s.files.includes(path) && paths.indexOf(path) === index)
+
+    return added.length === 0 ? s : { ...s, files: [...s.files, ...added] }
+  })
+
+// What git printed, or null when it failed, is not there or said too much
+// to read whole.
+const git = async ($: EngineInterface, args: string[]) => {
+  try {
+    const ran = await $.process.run(['git', ...args], { timeoutMs: GIT_TIMEOUT_MS })
+
+    return ran.exitCode === 0 && !ran.isStdoutTruncated ? ran.stdout : null
+  } catch {
+    return null
+  }
+}
+
+const split = (out: string | null, separator = '\n') => (out ?? '').split(separator).filter(line => line !== '')
+
+// The repository's root and the untracked files under it, as absolute paths.
+const untrackedNow = async ($: EngineInterface) => {
+  const top = split(await git($, ['rev-parse', '--show-toplevel']))[0]
+  if (top === undefined) return null
+
+  const others = split(await git($, ['ls-files', '--others', '--exclude-standard', '--full-name', '-z']), '\0')
+
+  return { top, others: others.map(path => `${top}/${path}`) }
+}
+
+// Remembers the work tree as the session found it: uncommitted changes in a
+// stash commit nothing points at, else HEAD.
+const settle = async ($: EngineInterface) => {
+  if ((await read($, stats)).base !== '') return
+
+  const found = await untrackedNow($)
+  if (found === null) return
+  const base = split(await git($, ['stash', 'create']))[0] ?? split(await git($, ['rev-parse', 'HEAD']))[0]
+  if (base === undefined) return
+
+  await update($, stats, (s): Stats => ({ ...s, base, untracked: found.others }))
+}
+
+// Adds what git sees changed since the session began, whatever changed it.
+// A file untracked then stays out even once added, since the base lacks it;
+// a rename counts as both its paths.
+const sweep = async ($: EngineInterface) => {
+  const { base, untracked } = await read($, stats)
+  if (base === '') return
+
+  const found = await untrackedNow($)
+  if (found === null) return
+  const diff = await git($, ['diff', '--name-only', '--no-renames', '-z', base])
+  if (diff === null) return
+
+  const changed = split(diff, '\0').map(path => `${found.top}/${path}`)
+  await track($, [...changed, ...found.others].filter(path => !untracked.includes(path)))
+}
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -172,6 +231,7 @@ export const register: Register = on => {
     })
     const now = await $.clock.now()
     await update($, stats, (s): Stats => (s.startedAt > 0 ? s : { ...s, startedAt: now }))
+    await settle($)
     // A reload mid-refresh leaves nothing running.
     await update($, summary, (s): Summary => ({ ...s, isBusy: false }))
 
@@ -210,21 +270,21 @@ export const register: Register = on => {
 
   on('tool.call', { tool: 'Edit' }, async ($, e, next) => {
     const ran = await next(e)
-    if (ran.deny === undefined && !ran.isError) await track($, e.file_path)
+    if (ran.deny === undefined && !ran.isError) await track($, [e.file_path])
 
     return ran
   })
 
   on('tool.call', { tool: 'Write' }, async ($, e, next) => {
     const ran = await next(e)
-    if (ran.deny === undefined && !ran.isError) await track($, e.file_path)
+    if (ran.deny === undefined && !ran.isError) await track($, [e.file_path])
 
     return ran
   })
 
   on('tool.call', { tool: 'NotebookEdit' }, async ($, e, next) => {
     const ran = await next(e)
-    if (ran.deny === undefined && !ran.isError) await track($, e.notebook_path)
+    if (ran.deny === undefined && !ran.isError) await track($, [e.notebook_path])
 
     return ran
   })
@@ -257,6 +317,7 @@ export const register: Register = on => {
       void describe($, entry.id, entry.prompt, e.answer).catch(() => undefined)
     }
 
+    await sweep($)
     const counted = await update($, stats, (s): Stats => ({ ...s, turns: s.turns + 1, sinceSummary: s.sinceSummary + 1 }))
     if (counted.sinceSummary >= SUMMARY_EVERY) void refresh($).catch(() => undefined)
 
