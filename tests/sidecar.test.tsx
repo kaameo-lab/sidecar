@@ -928,6 +928,15 @@ test('digest helpers', () => {
   expect(span(30_000)).toBe('1분 미만')
   expect(span(85 * 60_000)).toBe('1시간 25분')
   expect(promptLine('\n\n  첫 줄  \n둘째')).toBe('첫 줄')
+  // A slash command reads as it was typed.
+  const command = [
+    '<command-message>mattpocock-skills:grilling</command-message>',
+    '<command-name>/mattpocock-skills:grilling</command-name>',
+    '<command-args>sidecar 개선</command-args>',
+  ].join('\n')
+  expect(promptLine(command)).toBe('/mattpocock-skills:grilling sidecar 개선')
+  expect(promptLine('<command-name>/sidecar</command-name>\n<command-args></command-args>')).toBe('/sidecar')
+  expect(promptLine('<command-message>sidecar</command-message> 열어 줘')).toBe('sidecar 열어 줘')
 })
 
 test('the summary prompt lists only plain file names, and not too many', () => {

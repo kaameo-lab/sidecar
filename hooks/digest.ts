@@ -11,8 +11,24 @@ const cap = (text: string, max: number) => (text.length > max ? `${text.slice(0,
 
 const plain = (text: string) => text.replace(/\*\*|__|`|^#+\s*/gm, '')
 
+// A slash command's turn as it was typed, "/name args", from the tags the
+// engine wraps it in; null for any other prompt.
+const commandOf = (text: string) => {
+  const name = /<command-name>([^<]*)<\/command-name>/.exec(text)?.[1]?.trim()
+  if (!name) return null
+  const args = /<command-args>([^<]*)<\/command-args>/.exec(text)?.[1]?.trim() ?? ''
+  const typed = name.startsWith('/') ? name : `/${name}`
+
+  return args === '' ? typed : `${typed} ${args}`
+}
+
 // The first line of what was asked, for the log row.
-export const promptLine = (text: string) => cap(oneLine(text.split('\n').find(line => line.trim() !== '') ?? ''), 200)
+export const promptLine = (text: string) => {
+  const unwrapped = text.replace(/<\/?command-[a-z]+>/g, '')
+  const first = unwrapped.split('\n').find(line => line.trim() !== '') ?? ''
+
+  return cap(oneLine(commandOf(text) ?? first), 200)
+}
 
 export const gistPrompt = (prompt: string, answer: string) =>
   [
