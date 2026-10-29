@@ -10,10 +10,6 @@
   <img src="docs/media/demo.gif" alt="Claude Code 대화 옆의 sidecar pane: Claude가 Q1~Q4 질문을 내놓자 pane에 버튼이 생기고, 질문마다 답을 골라 보내면 요약에 남은 일이 채워지는 장면 (2배속)" width="100%">
 </p>
 
-<p align="center">
-  <a href="#설치">설치</a> · <a href="#보이는-것">보이는 것</a> · <a href="#사용">사용</a> · <a href="#접근-범위">접근 범위</a> · <a href="#문제-해결">문제 해결</a> · <a href="CHANGELOG.md">변경 기록</a>
-</p>
-
 ## 설치
 
 Claude Code 안에서:
