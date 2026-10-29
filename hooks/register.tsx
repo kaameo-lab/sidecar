@@ -68,6 +68,11 @@ const MARGIN = 2
 // The last answer of the main loop: a fork's transcript ends before it.
 let lastAnswer = ''
 
+// Counts the conversations this process has drawn. Work begun under one
+// (a summary, a sweep) that ends after a /clear or /resume drops its result
+// rather than write the old conversation into the new pane.
+let epoch = 0
+
 // A press goes out as the user's own words, so it sends only what the pane
 // showed whole in `room` cells: an option cut to fit goes out as its key, a
 // suggestion cut to fit is left out.
@@ -147,6 +152,7 @@ const describe = async ($: EngineInterface, id: string, prompt: string, said: st
 
 const refresh = async ($: EngineInterface) => {
   if ((await read($, summary)).isBusy) return
+  const began = epoch
 
   await update($, summary, (s): Summary => ({ ...s, isBusy: true, error: '' }))
   await update($, stats, (s): Stats => ({ ...s, sinceSummary: 0 }))
@@ -166,6 +172,7 @@ const refresh = async ($: EngineInterface) => {
     // Keeps the error above.
   }
 
+  if (epoch !== began) return
   await update($, summary, (s): Summary => ({ ...s, ...made, isBusy: false }))
   await save($).catch(() => undefined)
 }
@@ -219,6 +226,7 @@ const settle = async ($: EngineInterface) => {
 // a rename counts as both its paths. With no base yet (a repository with no
 // commit when the session began), it first tries to settle one.
 const sweep = async ($: EngineInterface) => {
+  const began = epoch
   if ((await read($, stats)).base === '') await settle($)
   const { base, untracked } = await read($, stats)
   if (base === '') return
@@ -229,6 +237,7 @@ const sweep = async ($: EngineInterface) => {
   if (diff === null) return
 
   const changed = split(diff, '\0').map(path => `${found.top}/${path}`)
+  if (epoch !== began) return
   await track($, [...changed, ...found.others].filter(path => !untracked.includes(path)))
 }
 
@@ -277,6 +286,7 @@ const restore = async ($: EngineInterface) => {
 // the person's, not the conversation's.
 const reset = async ($: EngineInterface) => {
   const now = await $.clock.now()
+  epoch += 1
   lastAnswer = ''
   await update($, view, (): View => EMPTY_VIEW)
   await update($, log, (): Entry[] => NO_ENTRIES)

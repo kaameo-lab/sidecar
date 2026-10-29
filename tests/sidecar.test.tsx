@@ -733,6 +733,33 @@ for (const reason of ['clear', 'resume'] as const) {
   })
 }
 
+test('a summary that lands after a /clear is dropped', async ($, on) => {
+  host(on)
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  fakeStore(on, 's1')
+  let release = () => {}
+  const held = new Promise<void>(resolve => {
+    release = resolve
+  })
+  on('model.fork', async () => {
+    await held
+    return { value: { isAnswered: true as const, text: '{"goal": "이전 대화", "decisions": [], "open": []}', usage: USAGE } }
+  })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  // The press waits on the fork, so it is left running.
+  const pressed = ui.press({ key: 'refresh' })
+  await drain()
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+  release()
+  await pressed
+  await drain()
+
+  expect(await ui.find({ type: 'Text', text: /^목표/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^아직 요약이 없어요/ })).toBeDefined()
+  await ui.unmount()
+})
+
 // A session saved mid-turn, as the store holds it.
 const snapshot = (shape: string) => ({
   shape,
