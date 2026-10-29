@@ -16,10 +16,14 @@ export type View = {
   items: Item[]
   // Item id → the answer picked for it.
   answers: Record<string, string>
-  // The item id the field answers, or '' when it answers the whole reply.
+  // The item whose own field is open, or ''.
   editing: string
   sent: string
+  // What that field holds, not yet its answer.
   draft: string
+  // The bottom field: a note sent under the answers (with plain options, the
+  // reply itself).
+  note: string
 }
 
 // One turn of the main conversation: what was asked, and a one-line gist and

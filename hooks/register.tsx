@@ -26,6 +26,7 @@ const EMPTY_VIEW: View = {
   editing: '',
   sent: '',
   draft: '',
+  note: '',
 }
 const NO_ENTRIES: Entry[] = []
 const EMPTY_SUMMARY: Summary = {
@@ -43,7 +44,7 @@ const EMPTY_FOLDED: Folded = { choices: false, summary: false, diagram: false, l
 
 // Change a tag when its type's fields change: it declines what an earlier
 // version stored, which outlives a reload.
-const view = atom({ plugin: 'sidecar', key: 'view' } as const, EMPTY_VIEW, { shape: 'view-3' })
+const view = atom({ plugin: 'sidecar', key: 'view' } as const, EMPTY_VIEW, { shape: 'view-4' })
 const log = atom({ plugin: 'sidecar', key: 'log' } as const, NO_ENTRIES, { shape: 'log-1' })
 const summary = atom({ plugin: 'sidecar', key: 'summary' } as const, EMPTY_SUMMARY, { shape: 'summary-2' })
 const stats = atom({ plugin: 'sidecar', key: 'stats' } as const, EMPTY_STATS, { shape: 'stats-2' })
@@ -116,9 +117,12 @@ const send = async ($: EngineInterface, text: string) => {
   const trimmed = text.trim()
   if (trimmed === '') return
 
-  await update($, view, (v): View => ({ ...v, phase: 'sent', sent: trimmed, draft: '', editing: '' }))
+  await update($, view, (v): View => ({ ...v, phase: 'sent', sent: trimmed, draft: '', note: '', editing: '' }))
   await $.prompt.submit({ text: trimmed, asUser: true })
 }
+
+// A reply with the bottom field's note under it, a blank line between.
+const withNote = (reply: string, note: string) => [reply, note.trim()].filter(part => part !== '').join('\n\n')
 
 // The answers with the open question's unsaved text kept as its own: what
 // the field shows is what the person means, unless they now answer that
@@ -401,7 +405,7 @@ export const register: Register = on => {
 
     const items = e.isAborted ? null : (parseQuestions(e.answer) ?? parseNumbered(e.answer))
     const parsed = e.isAborted || items ? null : parseChoices(e.answer)
-    const fresh = { answers: {}, editing: '', sent: '', draft: '' }
+    const fresh = { answers: {}, editing: '', sent: '', draft: '', note: '' }
     await update($, view, (v): View => {
       if (items) return { ...v, ...fresh, phase: 'options', question: '', choices: [], items }
       if (parsed) return { ...v, ...fresh, phase: 'options', ...parsed, items: [] }
@@ -467,6 +471,8 @@ export const register: Register = on => {
       const answered = v.items.filter(item => now.answers[item.id] !== undefined).length
       const canFill = v.items.every(item => now.answers[item.id] !== undefined || item.suggestion !== '')
       const isComplete = answered === v.items.length
+      // What 보내기 and Enter in the bottom field send, drawn before they do.
+      const preview = withNote(compose(now, false, columns), v.note)
 
       return (
         <Box flexDirection="column">
@@ -545,16 +551,22 @@ export const register: Register = on => {
               )
             })}
           </Text>
-          {/* While one question takes its own answer, the whole reply's field steps aside. */}
-          {Input && v.editing === '' && (
+          {Input && (
             <Input
               key="free"
-              placeholder="전체 답 직접 입력"
+              placeholder="덧붙일 말 (선택)"
               submitLabel="보내기"
-              value={v.draft}
-              onInput={value => update($, view, cur => ({ ...cur, draft: value }))}
-              onSubmit={value => send($, value)}
+              value={v.note}
+              onInput={value => update($, view, cur => ({ ...cur, note: value }))}
+              onSubmit={value => send($, withNote(compose(now, false, columns), value))}
             />
+          )}
+          {preview !== '' && (
+            <Box key="preview" flexDirection="column">
+              {preview.split('\n').map(line => (
+                <Text dimColor>{line === '' ? '  │' : `  │ ${fit(line, columns)}`}</Text>
+              ))}
+            </Box>
           )}
           <Box flexDirection="row">
             {canFill && !isComplete && (
@@ -562,7 +574,7 @@ export const register: Register = on => {
                 key="send-all"
                 variant="primary"
                 label={answered === 0 ? '모두 추천대로 보내기' : '나머지는 추천대로 보내기'}
-                onPress={() => send($, compose(now, true, columns))}
+                onPress={() => send($, withNote(compose(now, true, columns), v.note))}
               />
             )}
             {answered > 0 && (
@@ -570,7 +582,7 @@ export const register: Register = on => {
                 key="send-picked"
                 variant="primary"
                 label={isComplete ? '보내기' : '고른 것만 보내기'}
-                onPress={() => send($, compose(now, false, columns))}
+                onPress={() => send($, withNote(compose(now, false, columns), v.note))}
               />
             )}
           </Box>
@@ -582,6 +594,11 @@ export const register: Register = on => {
     // terminal, four cells over its label.
     const choiceRoom = body - 4 - (cells('✎') + 4)
 
+    // What a plain option sends: its words when they showed whole, else its key.
+    const wordsOf = (choice: Choice) => (isWhole(said(choice), choiceRoom) ? said(choice) : choice.key)
+    // A note still holding only an ✎'s "b, " adds nothing to a press.
+    const added = v.choices.some(choice => v.note.trim() === `${wordsOf(choice)},`) ? '' : v.note
+
     const letters = () => (
       <Box flexDirection="column">
         {v.question !== '' && (
@@ -590,7 +607,7 @@ export const register: Register = on => {
           </Text>
         )}
         {v.choices.map(choice => {
-          const words = isWhole(said(choice), choiceRoom) ? said(choice) : choice.key
+          const words = wordsOf(choice)
 
           return (
             <Box flexDirection="row">
@@ -598,14 +615,14 @@ export const register: Register = on => {
                 key={`choice-${choice.key}`}
                 hotkey={choice.key}
                 label={fit(said(choice), choiceRoom)}
-                onPress={() => send($, words)}
+                onPress={() => send($, withNote(words, added))}
               />
               <Button
                 key={`edit-${choice.key}`}
                 label="✎"
                 dimColor
                 onPress={async () => {
-                  await update($, view, cur => ({ ...cur, draft: `${words}, ` }))
+                  await update($, view, cur => ({ ...cur, note: `${words}, ` }))
                   await focusOn($, 'free')
                 }}
               />
@@ -617,8 +634,8 @@ export const register: Register = on => {
             key="free"
             placeholder="직접 입력"
             submitLabel="보내기"
-            value={v.draft}
-            onInput={value => update($, view, cur => ({ ...cur, draft: value }))}
+            value={v.note}
+            onInput={value => update($, view, cur => ({ ...cur, note: value }))}
             onSubmit={value => send($, value)}
           />
         )}

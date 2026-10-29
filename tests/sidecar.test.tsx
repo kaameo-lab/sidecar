@@ -318,14 +318,12 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await ui.find({ key: 'answer-Q2' })).toBeUndefined()
     await ui.press({ key: 'edit-Q2' })
     const keys = await order()
-    // Between Q2's buttons and Q3's, and the field for the whole reply steps aside.
+    // Between Q2's buttons and Q3's.
     expect(keys.indexOf('answer-Q2')).toBeGreaterThan(keys.indexOf('edit-Q2'))
     expect(keys.indexOf('answer-Q2')).toBeLessThan(keys.indexOf('pick-Q3-a'))
-    expect(await ui.find({ key: 'free' })).toBeUndefined()
 
     await ui.input({ key: 'answer-Q2', text: '합의 항목만 적자' })
     expect(await ui.find({ key: 'answer-Q2' })).toBeUndefined()
-    expect(await ui.find({ key: 'free' })).toBeDefined()
     await ui.press({ key: 'pick-Q3-b' })
     await ui.press({ key: 'send-picked' })
     expect(sent).toEqual(['Q2: 합의 항목만 적자\nQ3: b) 로컬에만 둔다'])
@@ -368,6 +366,59 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.press({ key: 'pick-Q3-a' })
     await ui.press({ key: 'send-picked' })
     expect(sent).toEqual(['Q3: a) EC2에 둔다'])
+    await ui.unmount()
+  })
+
+  test(`the bottom field adds a note under the chosen answers (${surface})`, async ($, on) => {
+    const sent = host(on)
+    await answer($, ASKED)
+    const ui = await $.ui.mount({ ...PANE, surface })
+
+    await ui.press({ key: 'ok-Q1' })
+    await ui.press({ key: 'pick-Q3-b' })
+    // Typed, never Entered, then the send button.
+    await ui.input({ key: 'free', text: 'testtesttest', kind: 'change' })
+    await ui.press({ key: 'send-picked' })
+    expect(sent).toEqual([['Q1: 추천대로 (예. 새 이슈 하나로 묶습니다.)', 'Q3: b) 로컬에만 둔다', '', 'testtesttest'].join('\n')])
+    await ui.unmount()
+  })
+
+  test(`Enter in the bottom field sends the answers with it (${surface})`, async ($, on) => {
+    const sent = host(on)
+    await answer($, ASKED)
+    const ui = await $.ui.mount({ ...PANE, surface })
+
+    await ui.press({ key: 'pick-Q3-a' })
+    await ui.press({ key: 'edit-Q2' })
+    await ui.input({ key: 'answer-Q2', text: '합의 항목만', kind: 'change' })
+    await ui.input({ key: 'free', text: '테스트도 같이' })
+    expect(sent).toEqual([['Q2: 합의 항목만', 'Q3: a) EC2에 둔다', '', '테스트도 같이'].join('\n')])
+    await ui.unmount()
+  })
+
+  test(`a plain option goes out with the note under it (${surface})`, async ($, on) => {
+    const sent = host(on)
+    await answer($, GRILL)
+    const ui = await $.ui.mount({ ...PANE, surface })
+
+    await ui.input({ key: 'free', text: '만료는 7일', kind: 'change' })
+    await ui.press({ key: 'choice-b' })
+    expect(sent).toEqual(['b) JWT\n\n만료는 7일'])
+    await ui.unmount()
+  })
+
+  test(`what a send would say shows above the button (${surface})`, async ($, on) => {
+    host(on)
+    await answer($, ASKED)
+    const ui = await $.ui.mount({ ...PANE, surface })
+
+    expect(await ui.find({ key: 'preview' })).toBeUndefined()
+    await ui.press({ key: 'pick-Q3-b' })
+    await ui.input({ key: 'free', text: '테스트도', kind: 'change' })
+    const lines = (await ui.findAll({ type: 'Text', text: /^  │/ })).map(text => text.text)
+    expect(lines).toEqual(['  │ Q3: b) 로컬에만 둔다', '  │', '  │ 테스트도'])
+    const keys = (await ui.findAll({})).map(element => element.key)
+    expect(keys.indexOf('preview')).toBeLessThan(keys.indexOf('send-picked'))
     await ui.unmount()
   })
 
