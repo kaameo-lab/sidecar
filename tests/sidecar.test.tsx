@@ -466,6 +466,26 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.unmount()
   })
 
+  test(`a written answer's field grows with its text, four lines at most (${surface})`, async ($, on) => {
+    host(on)
+    await answer($, ASKED)
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const rows = async (key: string) => (await ui.find({ key }))?.props.rows
+
+    await ui.press({ key: 'edit-Q2' })
+    expect(await rows('answer-Q2')).toBe(1)
+    // Forty Hangul syllables are eighty cells, past two lines of this pane.
+    await ui.input({ key: 'answer-Q2', text: '가'.repeat(40), kind: 'change' })
+    expect(await rows('answer-Q2')).toBe(3)
+    await ui.input({ key: 'answer-Q2', text: '가'.repeat(300), kind: 'change' })
+    expect(await rows('answer-Q2')).toBe(4)
+
+    expect(await rows('free')).toBe(1)
+    await ui.input({ key: 'free', text: '나'.repeat(40), kind: 'change' })
+    expect(await rows('free')).toBeGreaterThan(1)
+    await ui.unmount()
+  })
+
   test(`the named option carries the mark and stands for the suggestion (${surface})`, async ($, on) => {
     const sent = host(on)
 

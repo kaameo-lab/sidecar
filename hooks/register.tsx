@@ -122,6 +122,18 @@ const send = async ($: EngineInterface, text: string) => {
   await $.prompt.submit({ text: trimmed, asUser: true })
 }
 
+const FIELD_ROWS_MAX = 4
+
+// Lines a field needs to show `text` whole in `room` cells, so what is typed
+// past one line pushes what follows down instead of running under it; past
+// the most, the field scrolls within.
+const rowsFor = (text: string, room: number) => {
+  const width = Math.max(8, room)
+  const lines = text.split('\n').reduce((sum, line) => sum + Math.max(1, Math.ceil((cells(line) + 1) / width)), 0)
+
+  return Math.min(FIELD_ROWS_MAX, lines)
+}
+
 // A reply with the bottom field's note under it, a blank line between.
 const withNote = (reply: string, note: string) => [reply, note.trim()].filter(part => part !== '').join('\n\n')
 
@@ -452,6 +464,8 @@ export const register: Register = on => {
     const body = (e.props.bodyColumns ?? 40) - MARGIN
     const columns = body + MARGIN - 8
     const rule = <Text dimColor>{'─'.repeat(Math.max(8, body))}</Text>
+    // A field's own room: the body less the "⏎ 저장" drawn beside it while it has the keys.
+    const fieldRoom = (submit: string) => body - cells(`⏎ ${submit}`) - 2
     // A section's fold button: its name in the accent, what follows it dim.
     const heading = (part: Section, name: string, meta = '') => {
       const title = `${f[part] ? '▶' : '▼'} ${name}`
@@ -535,6 +549,7 @@ export const register: Register = on => {
                     key={`answer-${item.id}`}
                     placeholder={`${item.id} 답`}
                     submitLabel="저장"
+                    rows={rowsFor(v.draft, fieldRoom('저장'))}
                     value={v.draft}
                     onInput={value => update($, view, cur => ({ ...cur, draft: value }))}
                     onSubmit={value => answer($, item.id, value)}
@@ -573,6 +588,7 @@ export const register: Register = on => {
               key="free"
               placeholder="덧붙일 말 (선택)"
               submitLabel="보내기"
+              rows={rowsFor(v.note, fieldRoom('보내기'))}
               value={v.note}
               onInput={value => update($, view, cur => ({ ...cur, note: value }))}
               onSubmit={value => send($, withNote(compose(now, false, columns), value))}
@@ -644,6 +660,7 @@ export const register: Register = on => {
             key="free"
             placeholder="직접 입력"
             submitLabel="보내기"
+            rows={rowsFor(v.note, fieldRoom('보내기'))}
             value={v.note}
             onInput={value => update($, view, cur => ({ ...cur, note: value }))}
             onSubmit={value => send($, value)}
