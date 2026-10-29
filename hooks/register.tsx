@@ -209,8 +209,10 @@ const settle = async ($: EngineInterface) => {
 
 // Adds what git sees changed since the session began, whatever changed it.
 // A file untracked then stays out even once added, since the base lacks it;
-// a rename counts as both its paths.
+// a rename counts as both its paths. With no base yet (a repository with no
+// commit when the session began), it first tries to settle one.
 const sweep = async ($: EngineInterface) => {
+  if ((await read($, stats)).base === '') await settle($)
   const { base, untracked } = await read($, stats)
   if (base === '') return
 
@@ -318,7 +320,7 @@ export const register: Register = on => {
       void describe($, entry.id, entry.prompt, e.answer).catch(() => undefined)
     }
 
-    await sweep($)
+    void sweep($).catch(() => undefined)
     const counted = await update($, stats, (s): Stats => ({ ...s, turns: s.turns + 1, sinceSummary: s.sinceSummary + 1 }))
     if (counted.sinceSummary >= SUMMARY_EVERY) void refresh($).catch(() => undefined)
 

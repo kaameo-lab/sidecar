@@ -524,6 +524,11 @@ test('the summary refreshes on the button and every fifth turn, with changed fil
   await ui.unmount()
 })
 
+// Lets hooks started without waiting run to their end.
+const drain = async () => {
+  for (let i = 0; i < 500; i += 1) await Promise.resolve()
+}
+
 // A stand-in git over `/repo`: the session starts from stash commit `base`;
 // `diff` and `others` are what it reports since then, NUL-separated.
 const fakeGit = (on: On, tree: { diff: string; others: string }) => {
@@ -557,10 +562,44 @@ test('files changed outside the edit tools show once the turn ends', async ($, o
   tree.diff = 'hooks/register.tsx\0old.txt\0'
   tree.others = 'notes.md\0'
   await turn($, 't1', '고쳐', '고쳤어요')
+  await drain()
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   // old.txt was there before the session began.
   expect(await ui.find({ type: 'Text', text: '바뀐 파일  register.tsx, notes.md' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a repository with no commit yet is tracked from its first commit', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  const tree = { head: '', diff: '' }
+  const ran = (stdout: string | null) => ({
+    value: { exitCode: stdout === null ? 128 : 0, stdout: stdout ?? '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+  })
+  on('process.run', (_, e) => {
+    const args = e.argv.slice(1).join(' ')
+    if (args === 'rev-parse --show-toplevel') return ran('/repo\n')
+    if (args.startsWith('ls-files')) return ran('')
+    if (args === 'stash create') return ran(tree.head === '' ? null : '')
+    if (args === 'rev-parse HEAD') return ran(tree.head === '' ? null : `${tree.head}\n`)
+    if (args === `diff --name-only --no-renames -z ${tree.head}`) return ran(tree.diff)
+    return ran(null)
+  })
+
+  await $.session.start(START)
+  tree.head = 'first'
+  await turn($, 't1', '커밋해', '커밋했어요')
+  await drain()
+  tree.diff = 'src/app.ts\0'
+  await turn($, 't2', '고쳐', '고쳤어요')
+  await drain()
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: '바뀐 파일  app.ts' })).toBeDefined()
   await ui.unmount()
 })
 
