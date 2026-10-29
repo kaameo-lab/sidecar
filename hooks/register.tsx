@@ -573,7 +573,8 @@ export const register: Register = on => {
       </Box>
     )
 
-    const files = [...new Set(st.files.map(baseName))]
+    // A name may hold a line break or a direction mark that would break the row.
+    const files = [...new Set(st.files.map(path => baseName(path).replace(/[\p{Cc}\p{Cf}]/gu, '?')))]
     const shown = entries.slice(-LOG_SHOWN).reverse()
 
     return (

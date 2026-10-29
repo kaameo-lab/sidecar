@@ -862,6 +862,16 @@ for (const [how, shape, isBack] of [
   })
 }
 
+test('a file name that would break its row shows its odd characters as ?', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  on('tool.call', () => ({ result: {} }))
+  await $.tool.call({ tool: 'Write', file_path: '/x/a\nb\u202e.ts', content: 'c' })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: '바뀐 파일  a?b?.ts' })).toBeDefined()
+  await ui.unmount()
+})
+
 test('a fork with nothing to read says so', async ($, on) => {
   mock.clock(on, { now: NOW })
   on('model.fork', () => ({ value: { isAnswered: false as const, reason: 'nothing-to-fork' as const } }))
