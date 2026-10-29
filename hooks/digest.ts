@@ -22,6 +22,21 @@ const commandOf = (text: string) => {
   return args === '' ? typed : `${typed} ${args}`
 }
 
+// A turn the engine started for a background task's notice, as its row
+// reads: the notice's summary, else its first line with the tags off, else
+// ''; null for a turn the person started.
+export const noticeLine = (text: string) => {
+  if (!text.trimStart().startsWith('<task-notification>')) return null
+  const summary = /<summary>([^<]*)<\/summary>/.exec(text)?.[1]?.trim()
+  if (summary) return cap(oneLine(summary), 200)
+  const first = text
+    .split('\n')
+    .map(line => line.replace(/<[^>]*>/g, '').trim())
+    .find(line => line !== '')
+
+  return cap(oneLine(first ?? ''), 200)
+}
+
 // The first line of what was asked, for the log row.
 export const promptLine = (text: string) => {
   const unwrapped = text.replace(/<\/?command-[a-z]+>/g, '')

@@ -7,6 +7,7 @@ import {
   clockTime,
   fallbackGist,
   gistPrompt,
+  noticeLine,
   parseGist,
   parseSummary,
   promptLine,
@@ -45,13 +46,13 @@ const EMPTY_FOLDED: Folded = { choices: false, summary: false, diagram: false, l
 // Change a tag when its type's fields change: it declines what an earlier
 // version stored, which outlives a reload.
 const view = atom({ plugin: 'sidecar', key: 'view' } as const, EMPTY_VIEW, { shape: 'view-4' })
-const log = atom({ plugin: 'sidecar', key: 'log' } as const, NO_ENTRIES, { shape: 'log-1' })
+const log = atom({ plugin: 'sidecar', key: 'log' } as const, NO_ENTRIES, { shape: 'log-2' })
 const summary = atom({ plugin: 'sidecar', key: 'summary' } as const, EMPTY_SUMMARY, { shape: 'summary-2' })
 const stats = atom({ plugin: 'sidecar', key: 'stats' } as const, EMPTY_STATS, { shape: 'stats-2' })
 const folded = atom({ plugin: 'sidecar', key: 'folded' } as const, EMPTY_FOLDED, { shape: 'folded-2' })
 
 // The tags of the atoms a session's snapshot holds: change it with theirs.
-const SAVED_SHAPE = 'log-1 summary-2 stats-2 folded-2'
+const SAVED_SHAPE = 'log-2 summary-2 stats-2 folded-2'
 const SESSIONS_KEPT = 20
 
 const PLUGIN = 'sidecar'
@@ -364,10 +365,12 @@ export const register: Register = on => {
 
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
+      const notice = noticeLine(e.text)
       const entry: Entry = {
         id: e.turnId,
         at: await $.clock.now(),
-        prompt: promptLine(e.text),
+        prompt: notice ?? promptLine(e.text),
+        from: notice === null ? 'person' : 'notice',
         gist: '',
         detail: '',
         status: 'working',
@@ -733,7 +736,7 @@ export const register: Register = on => {
               const gist = entry.gist !== '' ? entry.gist : isWorking ? '답변 중…' : '요약하는 중…'
               const dot = isWorking ? '● ' : ''
               const time = `${clockTime(entry.at)} `
-              const asked = fit(`나  ${entry.prompt}`, columns + 4 - cells(dot + time))
+              const asked = fit(`${entry.from === 'notice' ? '알림' : '나'}  ${entry.prompt}`, columns + 4 - cells(dot + time))
 
               return (
                 <Box flexDirection="column">

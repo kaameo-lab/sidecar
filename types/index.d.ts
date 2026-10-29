@@ -32,6 +32,9 @@ export type Entry = {
   id: string
   at: number
   prompt: string
+  // Who started the turn: the person, or the engine for a background task's
+  // notice (its row reads 알림, its prompt the notice's summary).
+  from: 'person' | 'notice'
   gist: string
   detail: string
   status: 'working' | 'done' | 'stopped'

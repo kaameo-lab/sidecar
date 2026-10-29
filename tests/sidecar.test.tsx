@@ -4,7 +4,7 @@ import type { Engine } from 'claude-code/testing'
 
 import { parseChoices, parseNumbered, parseQuestions } from '../hooks/parse'
 import { cells, fit } from '../hooks/width'
-import { parseGist, parseSummary, promptLine, span, summaryPrompt } from '../hooks/digest'
+import { noticeLine, parseGist, parseSummary, promptLine, span, summaryPrompt } from '../hooks/digest'
 import { layout, plainText } from '../hooks/diagram'
 
 // 2026-10-28 14:00 KST
@@ -642,6 +642,17 @@ test('each turn becomes a log row with a small model’s gist', async ($, on) =>
   await ui.unmount()
 })
 
+test('a turn a background notice started is a notice row, not the person', async ($, on) => {
+  host(on)
+  await turn($, 't1', '로그인 고쳐', '고쳤어요')
+  await turn($, 't2', NOTICE, '리뷰 결과를 반영했어요')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 80 } })
+
+  const rows = (await ui.findAll({ type: 'Button', text: /\d\d:\d\d / })).map(row => String(row.props.label))
+  expect(rows).toEqual([expect.stringMatching(/ 알림  Agent "Standards review" finished$/), expect.stringMatching(/ 나  로그인 고쳐$/)])
+  await ui.unmount()
+})
+
 test('without a model the gist is the answer’s first sentence', async ($, on) => {
   host(on)
   on('model.complete', () => ({ value: { isAnswered: false as const, reason: 'empty-reply' as const, usage: USAGE } }))
@@ -881,7 +892,7 @@ test('the session saves its pane once more as it ends', async ($, on) => {
   const held = fakeStore(on, 's1')
 
   await $.session.end({ reason: 'prompt_input_exit', sessionId: 's1', resume: { id: 's1' } })
-  expect((held.get('session:s1') as { shape?: string } | undefined)?.shape).toBe('log-1 summary-2 stats-2 folded-2')
+  expect((held.get('session:s1') as { shape?: string } | undefined)?.shape).toBe('log-2 summary-2 stats-2 folded-2')
 })
 
 for (const reason of ['clear', 'resume'] as const) {
@@ -934,8 +945,8 @@ test('a summary that lands after a /clear is dropped', async ($, on) => {
 const snapshot = (shape: string) => ({
   shape,
   log: [
-    { id: 't1', at: NOW, prompt: '로그인 고쳐', gist: '로그인 수정', detail: '', status: 'done' },
-    { id: 't2', at: NOW, prompt: '테스트 돌려', gist: '', detail: '', status: 'working' },
+    { id: 't1', at: NOW, prompt: '로그인 고쳐', from: 'person', gist: '로그인 수정', detail: '', status: 'done' },
+    { id: 't2', at: NOW, prompt: '테스트 돌려', from: 'person', gist: '', detail: '', status: 'working' },
   ],
   summary: { goal: '로그인 흐름 정리', decisions: [], open: [], nodes: [], edges: [], at: NOW, isBusy: true, error: '' },
   stats: { startedAt: NOW, turns: 2, sinceSummary: 0, files: ['/repo/login.ts'], base: 'base', untracked: [] },
@@ -945,7 +956,7 @@ const snapshot = (shape: string) => ({
 test('a restored session measures git from where it now starts', async ($, on) => {
   host(on)
   starts(on)
-  fakeStore(on, 's1', new Map([['session:s1', snapshot('log-1 summary-2 stats-2 folded-2')]]))
+  fakeStore(on, 's1', new Map([['session:s1', snapshot('log-2 summary-2 stats-2 folded-2')]]))
   on('process.run', (_, e) => {
     const args = e.argv.slice(1).join(' ')
     if (args === 'rev-parse --show-toplevel') return ran('/repo\n')
@@ -970,7 +981,7 @@ test('a restored session measures git from where it now starts', async ($, on) =
 test('a reload keeps the pane it holds over the saved one', async ($, on) => {
   mock.clock(on, { now: NOW })
   starts(on)
-  fakeStore(on, 's1', new Map([['session:s1', snapshot('log-1 summary-2 stats-2 folded-2')]]))
+  fakeStore(on, 's1', new Map([['session:s1', snapshot('log-2 summary-2 stats-2 folded-2')]]))
 
   await $.session.start(START)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -983,7 +994,7 @@ test('a reload keeps the pane it holds over the saved one', async ($, on) => {
 })
 
 for (const [how, shape, isBack] of [
-  ['gets its pane back', 'log-1 summary-2 stats-2 folded-2', true],
+  ['gets its pane back', 'log-2 summary-2 stats-2 folded-2', true],
   ['saved by an older version starts empty', 'log-1 summary-1 stats-1 folded-2', false],
 ] as const) {
   test(`a resumed session ${how}`, async ($, on) => {
@@ -1051,6 +1062,24 @@ test('digest helpers', () => {
   expect(promptLine(command)).toBe('/mattpocock-skills:grilling sidecar 개선')
   expect(promptLine('<command-name>/sidecar</command-name>\n<command-args></command-args>')).toBe('/sidecar')
   expect(promptLine('<command-message>sidecar</command-message> 열어 줘')).toBe('sidecar 열어 줘')
+})
+
+const NOTICE = [
+  '<task-notification>',
+  '<task-id>a2bd1b99</task-id>',
+  '<status>completed</status>',
+  '<summary>Agent "Standards review" finished</summary>',
+  '</task-notification>',
+].join('\n')
+
+test('a background notice reads as what it says, not as the person', () => {
+  expect(noticeLine(NOTICE)).toBe('Agent "Standards review" finished')
+  // No summary: its first line once the tags are off.
+  expect(noticeLine('<task-notification>\nflightdeck: its hook was skipped.\n</task-notification>')).toBe('flightdeck: its hook was skipped.')
+  expect(noticeLine('<task-notification>\n</task-notification>')).toBe('')
+  // What the person typed is no notice.
+  expect(noticeLine('로그인 고쳐')).toBeNull()
+  expect(noticeLine('<command-name>/sidecar</command-name>')).toBeNull()
 })
 
 test('the summary prompt lists only plain file names, and not too many', () => {
