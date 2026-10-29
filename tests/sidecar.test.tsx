@@ -306,6 +306,22 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.unmount()
   })
 
+  test(`a long question is cut to the pane (${surface})`, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    on('turn.start', (_, e) => ({ turnId: e.turnId }))
+    on('turn.complete', (_, e) => ({ text: e.answer }))
+
+    await answer($, '인증 흐름을 세션 쿠키로 갈지 JWT로 갈지, 아니면 OAuth만 둘지 정해야 하는데 어느 쪽으로 할까요?\na) 세션\nb) JWT')
+    const ui = await $.ui.mount({ ...PANE, surface })
+
+    const line = (await ui.find({ type: 'Text', text: /^Q\./ }))?.text ?? ''
+    expect(line).toMatch(/^Q\. 인증 흐름을.*…$/)
+    // bodyColumns 40 leaves the pane 36 cells for a heading row.
+    expect(cells(line)).toBeLessThanOrEqual(36)
+    await ui.unmount()
+  })
+
   test(`sending is the primary action (${surface})`, async ($, on) => {
     mock.clock(on, { now: NOW })
     on('ui.open', () => ({ value: { isPlaced: true } }))

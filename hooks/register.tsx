@@ -458,7 +458,7 @@ export const register: Register = on => {
       <Box flexDirection="column">
         {v.question !== '' && (
           <Text bold color="claude">
-            Q. {v.question}
+            {fit(`Q. ${v.question}`, columns + 4)}
           </Text>
         )}
         {v.choices.map(choice => {
