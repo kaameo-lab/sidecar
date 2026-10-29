@@ -53,7 +53,7 @@ claude --plugin-dir ./sidecar
 | **로그** | 턴마다 한 줄: 무엇을 물었고 Claude가 무엇을 했는지. 누르면 자세한 줄이 펼쳐집니다. | 턴이 끝날 때마다 |
 
 <p align="center">
-  <img src="docs/media/summary.png" alt="요약 섹션의 목표·결정·바뀐 파일·남은 일과, 작업 그림 섹션에 register.tsx가 parse.ts, digest.ts, diagram.ts, index.d.ts로 이어지는 상자 그림" width="640">
+  <img src="docs/media/summary.png" alt="sidecar pane의 요약(목표, 결정 다섯 가지, 바뀐 파일, 남은 일 네 가지), 작업 그림(run.py와 Gateway 설정 파일들이 상자와 선으로 이어진 구조), 로그(턴마다 물은 것과 한 일)" width="560">
 </p>
 
 pane은 대화형 세션이 시작될 때와 답에서 선택지를 찾았을 때 열립니다. 색은 사용 중인 Claude Code 테마를 따릅니다.
