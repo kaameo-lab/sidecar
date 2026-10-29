@@ -2,5 +2,10 @@
   "name": "sidecar",
   "version": "0.3.0",
   "description": "A side pane with buttons for Claude's options and questions, a session summary, a work diagram, and a log of the conversation",
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "kaameo"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/kaameo-lab/sidecar"
 }
