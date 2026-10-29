@@ -131,6 +131,10 @@ const answer = ($: EngineInterface, id: string, text: string) =>
 
 type Section = 'choices' | 'summary' | 'diagram' | 'log'
 
+// Moves the keys onto a field the pane draws, once it is drawn; a pane that
+// does not hold the keys refuses, and that is fine.
+const focusOn = ($: EngineInterface, key: string) => $.ui.focus({ requestId: PANE, key }).catch(() => undefined)
+
 const fold = ($: EngineInterface, part: Section) =>
   update($, folded, (f): Folded => ({ ...f, [part]: !f[part] }))
 
@@ -492,14 +496,15 @@ export const register: Register = on => {
                     key={`edit-${item.id}`}
                     label="✎ 직접"
                     dimColor
-                    onPress={() =>
-                      update($, view, (cur): View => {
+                    onPress={async () => {
+                      await update($, view, (cur): View => {
                         const old = cur.answers[item.id]
                         const draft = old === undefined || old.startsWith(RECOMMEND) ? '' : old
 
                         return { ...cur, editing: item.id, draft }
                       })
-                    }
+                      await focusOn($, `answer-${item.id}`)
+                    }}
                   />
                 </Box>
                 {Input && v.editing === item.id && (
@@ -585,7 +590,10 @@ export const register: Register = on => {
                 key={`edit-${choice.key}`}
                 label="✎"
                 dimColor
-                onPress={() => update($, view, cur => ({ ...cur, draft: `${words}, ` }))}
+                onPress={async () => {
+                  await update($, view, cur => ({ ...cur, draft: `${words}, ` }))
+                  await focusOn($, 'free')
+                }}
               />
             </Box>
           )
