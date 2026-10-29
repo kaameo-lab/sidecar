@@ -607,6 +607,32 @@ test('a refresh first asks git what changed since the session began', async ($, 
   await ui.unmount()
 })
 
+test('the refresh button stands apart from the summary heading', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ key: 'summary-head' }))?.props.gap).toBe(2)
+  await ui.unmount()
+})
+
+for (const [how, isInteractive, opens] of [
+  ['an interactive session', true, 1],
+  ['a run with no one at the prompt', false, 0],
+] as const) {
+  test(`${how} ${opens ? 'opens' : 'leaves closed'} the pane at start`, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    on('session.start', (_, e) => ({ cwd: e.cwd }))
+    on('command.register', (_, e) => ({ value: { command: e.name } }))
+    let opened = 0
+    on('ui.open', () => {
+      opened += 1
+      return { value: { isPlaced: true } }
+    })
+
+    await $.session.start({ ...START, isInteractive, surface: isInteractive ? 'terminal' : null })
+    expect(opened).toBe(opens)
+  })
+}
+
 test('a fork with nothing to read says so', async ($, on) => {
   mock.clock(on, { now: NOW })
   on('model.fork', () => ({ value: { isAnswered: false as const, reason: 'nothing-to-fork' as const } }))

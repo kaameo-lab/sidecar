@@ -234,6 +234,7 @@ export const register: Register = on => {
     await settle($)
     // A reload mid-refresh leaves nothing running.
     await update($, summary, (s): Summary => ({ ...s, isBusy: false }))
+    if (e.isInteractive) void $.ui.open({ id: PANE, title: TITLE }).catch(() => undefined)
 
     return next(e)
   })
@@ -508,7 +509,7 @@ export const register: Register = on => {
           </Box>
         )}
 
-        <Box flexDirection="row">
+        <Box key="summary-head" flexDirection="row" gap={2}>
           {heading('summary', '요약', s.at > 0 ? ` · ${clockTime(s.at)} 갱신` : '')}
           <Button
             key="refresh"
