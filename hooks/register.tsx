@@ -51,7 +51,7 @@ const folded = atom({ plugin: 'sidecar', key: 'folded' } as const, EMPTY_FOLDED,
 
 const PLUGIN = 'sidecar'
 const PANE = 'sidecar'
-const TITLE = '대화'
+const TITLE = 'Sidecar'
 const RECOMMEND = '추천대로'
 const MARK = ' ✓추천'
 const SUMMARY_EVERY = 5
@@ -244,7 +244,7 @@ export const register: Register = on => {
   on('command.run', { command: 'sidecar' }, async $ => {
     await $.ui.open({ id: PANE, title: TITLE })
 
-    return { text: '대화 pane을 열었어요.' }
+    return { text: 'Sidecar pane을 열었어요.' }
   })
 
   on('prompt.submit', async ($, e, next) => {

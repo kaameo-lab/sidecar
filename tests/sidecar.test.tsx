@@ -664,14 +664,14 @@ for (const [how, isInteractive, opens] of [
     mock.clock(on, { now: NOW })
     on('session.start', (_, e) => ({ cwd: e.cwd }))
     on('command.register', (_, e) => ({ value: { command: e.name } }))
-    let opened = 0
-    on('ui.open', () => {
-      opened += 1
+    const titles: string[] = []
+    on('ui.open', (_, e) => {
+      titles.push(e.title ?? '')
       return { value: { isPlaced: true } }
     })
 
     await $.session.start({ ...START, isInteractive, surface: isInteractive ? 'terminal' : null })
-    expect(opened).toBe(opens)
+    expect(titles).toEqual(opens ? ['Sidecar'] : [])
   })
 }
 
