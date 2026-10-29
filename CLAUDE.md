@@ -45,7 +45,7 @@ The repo is also its own marketplace (`kaameo-lab`, `.claude-plugin/marketplace.
 
 ## Tests
 
-Tests use `test`, `expect` and `mock` from `claude-code/testing`. An engine test gets `($, on)`. It stubs host events with `on('turn.complete' | 'model.complete' | 'model.fork' | 'ui.open' | …, handler)`. A stub for a call on `$` (`process.run`, `command.register`, `model.fork`, …) answers `{ value: … }`; one that answers otherwise makes the plugin's hook skip silently. Tests drive turns through `$.turn.start` and `$.turn.complete`, and mount the pane with `$.ui.mount({ ...PANE, surface })`. Buttons are found and pressed by their React `key` (`choice-b`, `pick-Q3-a`, `send-all`, `refresh`, …), so a key rename breaks tests. UI tests run once per surface (`terminal`, `desktop`).
+Tests use `test`, `expect` and `mock` from `claude-code/testing`. An engine test gets `($, on)`. It stubs host events with `on('turn.complete' | 'model.complete' | 'model.fork' | 'ui.open' | …, handler)`. A stub for a call on `$` (`process.run`, `command.register`, `model.fork`, …) answers `{ value: … }`; one that answers otherwise makes the plugin's hook skip silently. Tests drive turns through `$.turn.start` and `$.turn.complete`, and mount the pane with `$.ui.mount({ ...PANE, surface })`. Buttons are found and pressed by their React `key` (`choice-b`, `pick-Q3-a`, `edit-Q2` and the field it opens, `answer-Q2`, `send-all`, `refresh`, …), so a key rename breaks tests. UI tests run once per surface (`terminal`, `desktop`).
 
 ## Agent skills
 

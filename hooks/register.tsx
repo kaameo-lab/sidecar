@@ -502,6 +502,16 @@ export const register: Register = on => {
                     }
                   />
                 </Box>
+                {Input && v.editing === item.id && (
+                  <Input
+                    key={`answer-${item.id}`}
+                    placeholder={`${item.id} 답`}
+                    submitLabel="저장"
+                    value={v.draft}
+                    onInput={value => update($, view, cur => ({ ...cur, draft: value }))}
+                    onSubmit={value => answer($, item.id, value)}
+                  />
+                )}
               </Box>
             )
           })}
@@ -516,15 +526,15 @@ export const register: Register = on => {
               )
             })}
           </Text>
-          {Input && (
+          {/* While one question takes its own answer, the whole reply's field steps aside. */}
+          {Input && v.editing === '' && (
             <Input
               key="free"
-              label={v.editing === '' ? undefined : `${v.editing} 답`}
-              placeholder={v.editing === '' ? '전체 답 직접 입력' : '이 질문의 답'}
-              submitLabel={v.editing === '' ? '보내기' : '저장'}
+              placeholder="전체 답 직접 입력"
+              submitLabel="보내기"
               value={v.draft}
               onInput={value => update($, view, cur => ({ ...cur, draft: value }))}
-              onSubmit={value => (v.editing === '' ? send($, value) : answer($, v.editing, value))}
+              onSubmit={value => send($, value)}
             />
           )}
           <Box flexDirection="row">

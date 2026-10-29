@@ -295,7 +295,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     await ui.press({ key: 'ok-Q1' })
     await ui.press({ key: 'edit-Q2' })
-    await ui.input({ key: 'free', text: '합의 항목만 적자' })
+    await ui.input({ key: 'answer-Q2', text: '합의 항목만 적자' })
     expect(sent).toEqual([])
     expect((await ui.find({ type: 'Text', text: /^Q1 ✓/ }))?.text).toBe('Q1 ✓  Q2 ✎  Q3 –')
     expect((await ui.find({ key: 'send-picked' }))?.props.label).toBe('고른 것만 보내기')
@@ -306,6 +306,29 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(sent).toEqual([
       ['Q1: 추천대로 (예. 새 이슈 하나로 묶습니다.)', 'Q2: 합의 항목만 적자', 'Q3: b) 로컬에만 둔다'].join('\n'),
     ])
+    await ui.unmount()
+  })
+
+  test(`a question's own answer field opens right under it (${surface})`, async ($, on) => {
+    const sent = host(on)
+    await answer($, ASKED)
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const order = async () => (await ui.findAll({})).map(element => element.key).filter(key => key !== undefined)
+
+    expect(await ui.find({ key: 'answer-Q2' })).toBeUndefined()
+    await ui.press({ key: 'edit-Q2' })
+    const keys = await order()
+    // Between Q2's buttons and Q3's, and the field for the whole reply steps aside.
+    expect(keys.indexOf('answer-Q2')).toBeGreaterThan(keys.indexOf('edit-Q2'))
+    expect(keys.indexOf('answer-Q2')).toBeLessThan(keys.indexOf('pick-Q3-a'))
+    expect(await ui.find({ key: 'free' })).toBeUndefined()
+
+    await ui.input({ key: 'answer-Q2', text: '합의 항목만 적자' })
+    expect(await ui.find({ key: 'answer-Q2' })).toBeUndefined()
+    expect(await ui.find({ key: 'free' })).toBeDefined()
+    await ui.press({ key: 'pick-Q3-b' })
+    await ui.press({ key: 'send-picked' })
+    expect(sent).toEqual(['Q2: 합의 항목만 적자\nQ3: b) 로컬에만 둔다'])
     await ui.unmount()
   })
 
@@ -381,9 +404,9 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     expect(await ui.find({ type: 'Text', text: '1번 이슈 #48' })).toBeDefined()
     await ui.press({ key: 'edit-1번' })
-    await ui.input({ key: 'free', text: '닫아 주세요' })
+    await ui.input({ key: 'answer-1번', text: '닫아 주세요' })
     await ui.press({ key: 'edit-2번' })
-    await ui.input({ key: 'free', text: '만들어 주세요' })
+    await ui.input({ key: 'answer-2번', text: '만들어 주세요' })
     await ui.press({ key: 'send-picked' })
     expect(sent).toEqual(['1번: 닫아 주세요\n2번: 만들어 주세요'])
     await ui.unmount()
