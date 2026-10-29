@@ -293,9 +293,19 @@ export const register: Register = on => {
   })
 
   // The last word on what the session leaves for a resume: gists that landed
-  // after the last turn's save, folds changed since.
+  // after the last turn's save, folds changed since. A /clear goes on in this
+  // process under a new id with no session.start, so the pane starts over
+  // here; the next turn's sweep settles a fresh git base.
   on('session.end', async ($, e, next) => {
     await save($).catch(() => undefined)
+    if (e.reason === 'clear') {
+      const now = await $.clock.now()
+      lastAnswer = ''
+      await update($, view, (): View => EMPTY_VIEW)
+      await update($, log, (): Entry[] => NO_ENTRIES)
+      await update($, summary, (): Summary => EMPTY_SUMMARY)
+      await update($, stats, (): Stats => ({ ...EMPTY_STATS, startedAt: now }))
+    }
 
     return next(e)
   })

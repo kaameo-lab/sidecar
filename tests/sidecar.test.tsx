@@ -730,6 +730,26 @@ test('the session saves its pane once more as it ends', async ($, on) => {
   expect((held.get('session:s1') as { shape?: string } | undefined)?.shape).toBe('log-1 summary-2 stats-2 folded-2')
 })
 
+test('a /clear saves the conversation it leaves and starts the pane empty', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  const held = fakeStore(on, 's1')
+
+  await answer($, GRILL)
+  await drain()
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+
+  expect((held.get('session:s1') as { log: unknown[] } | undefined)?.log).toHaveLength(1)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: '아직 기록이 없어요.' })).toBeDefined()
+  expect(await ui.find({ key: 'fold-choices' })).toBeUndefined()
+  expect((await ui.find({ key: 'fold-log' }))?.props.label).toMatch(/^▼ 로그 · 턴 0/)
+  await ui.unmount()
+})
+
 // A session saved mid-turn, as the store holds it.
 const snapshot = (shape: string) => ({
   shape,

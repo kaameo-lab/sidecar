@@ -30,7 +30,7 @@ claude plugin validate .    # checks .claude-plugin/plugin.json and hooks/hooks.
   - `session.start`: restores the session's saved snapshot when there is one, then records where git's work tree stood (`git stash create`, else HEAD) as `stats.base`, and the files git didn't track then as `stats.untracked`. An interactive session also opens the pane.
   - `turn.start`: adds a log entry, but only for the main loop (`e.agentId === undefined`).
   - `turn.complete`: parses the answer with `parseQuestions` first and falls back to `parseChoices`. It sets `view.phase`, opens the pane when options were found, starts `sweep` without waiting for it (adds what git sees changed since `stats.base` to `stats.files`, settling a base first when there was none; `refresh` awaits it before summarising), starts `describe` (Haiku gist via `$.model.complete`) without waiting for it, and every `SUMMARY_EVERY` turns starts `refresh` (`$.model.fork` with a JSON summary prompt) the same way.
-  - `session.end`: saves the snapshot once more. A turn's end (after its `sweep`) and a finished `refresh` save it too.
+  - `session.end`: saves the snapshot once more. A turn's end (after its `sweep`) and a finished `refresh` save it too. On a `/clear` (`reason === 'clear'`), which goes on in the same process under a new id with no `session.start`, it then empties every atom but `folded`.
   - `tool.call` for Edit, Write and NotebookEdit: records the changed paths in `stats.files`.
   - `prompt.submit`: separates the plugin's own submissions (`origin.kind === 'plugin'`) from the user's typing.
   - `ui.render` (`component: 'Pane'`): draws the whole pane from atom state every time. Components come from `$.ui.resolve(e)`, and `Input` is optional because some surfaces don't have it.
