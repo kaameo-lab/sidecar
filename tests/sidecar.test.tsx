@@ -272,6 +272,27 @@ test('fit counts Hangul as two cells', () => {
   expect(fit('짧다', 10)).toBe('짧다')
 })
 
+test('a note after the question number, as when Claude asks again, still makes a question', () => {
+  const again = [
+    '❓ Q10 (쉽게 다시) - AWS 배포 권한을 prod 배포 job에서만 받을 수 있게 막아 둘까요?',
+    '',
+    '➡️ 네. prod environment job만 받게 합니다.',
+    '',
+    '---',
+    '',
+    '❓ Q11 - 배포 순서: 앱 순서대로 하나씩 배포할까요?',
+    '- A) 순차 배포',
+    '- B) 병렬 배포',
+    '',
+    '➡️ 네, A로 합니다.',
+  ].join('\n')
+  expect(parseQuestions(again)?.map(item => [item.id, item.title])).toEqual([
+    ['Q10', 'AWS 배포 권한을 prod 배포 job에서만 받을 수 있게 막아 둘까…'],
+    ['Q11', '배포 순서'],
+  ])
+  expect(parseQuestions('Q3 [재질문]: 어느 쪽으로 갈까요?')?.map(item => [item.id, item.title])).toEqual([['Q3', '어느 쪽으로 갈까요?']])
+})
+
 test('a Q line that asks nothing is no question', () => {
   expect(parseQuestions('Q1: 매출 12% 증가\nQ2: 매출 3% 감소')).toBeNull()
 })
