@@ -1,6 +1,6 @@
 {
   "name": "sidecar",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "A side pane with buttons for Claude's options and questions, a session summary, a work diagram, and a log of the conversation",
   "types": "./types/index.d.ts",
   "author": {
