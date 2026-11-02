@@ -1,6 +1,6 @@
 // Prompts for the two summaries and the parsing of what comes back.
 
-import type { DiagramEdge, DiagramNode } from '../types'
+import type { DiagramEdge, DiagramNode, Task } from '../types'
 import { visible } from './width'
 
 const ANSWER_MAX = 6000
@@ -136,12 +136,19 @@ const listable = (files: string[]) =>
 export const summaryPrompt = (lastAnswer: string, files: string[]) =>
   [
     '지금까지 이 세션의 대화를 요약하라. 도구는 쓰지 말고 JSON 객체 하나로만 답하라.',
-    '형식: {"goal": "이 세션의 목표 한 줄", "decisions": ["사용자와 정한 것"], "open": ["남은 일이나 대답을 기다리는 것"],',
-    ' "nodes": [{"id": "a", "label": "파일이나 모듈 이름", "note": "하는 일", "status": "new|changed|other"}],',
+    '형식: {"goal": "이 세션의 목표 한 줄", "now": "지금 하고 있는 일이나 사용자 대답을 기다리는 것 한 줄",',
+    ' "decisions": ["사용자와 정한 것"], "open": ["남은 일이나 대답을 기다리는 것"],',
+    ' "tasks": [{"name": "작업 이름", "status": "done|doing|waiting", "detail": "무엇을 바꿨고 어디까지 왔나"}],',
+    ' "nodes": [{"id": "a", "label": "파일 이름", "note": "이번 세션에 그 파일에서 바꾼 것", "status": "new|changed|other"}],',
     ' "edges": [{"from": "a", "to": "b"}]}',
-    'decisions는 최대 5개, open은 최대 4개, 각 항목은 40자 이내. 대화에 쓰인 언어로 써라.',
-    'nodes와 edges는 이 세션에서 만들거나 고친 코드의 구조도다. nodes는 최대 8개, label은 파일 이름처럼 짧게,',
-    'note는 12자 이내, status는 이번 세션에 새로 만들었으면 new, 고쳤으면 changed, 손대지 않았지만 구조상 필요하면 other.',
+    '길이는 터미널 칸으로 센다. 한글 한 글자는 2칸, 영문·숫자·기호는 1칸이다. 대화에 쓰인 언어로 써라.',
+    'goal과 now는 60칸 이내. decisions는 최대 5개, open은 최대 4개, 각 항목은 60칸 이내.',
+    'tasks는 이 세션에서 한 작업을 시간 순서로 나열한다. 이슈 하나나 사용자 요청 하나가 작업 하나이고, 최대 12개.',
+    'name은 40칸 이내로 쓰고 이슈 번호가 있으면 앞에 둔다. status는 끝났으면 done, 진행 중이면 doing,',
+    '사용자의 대답이나 승인을 기다리면 waiting. detail은 바꾼 것과 지금 상태를 50칸 이내로 쓴다(예: "digest.ts 고침 · push 끝, 릴리스 대기").',
+    'nodes와 edges는 이 세션에서 만들거나 고친 코드의 구조도다. nodes는 최대 8개, label은 파일 이름처럼 짧게.',
+    'note는 이번 세션에 그 파일에서 바꾼 것을 30칸 이내로 쓴다(예: "Q2\'·G1 인식 추가"). 손대지 않은 파일은 "고치지 않음".',
+    'status는 이번 세션에 새로 만들었으면 new, 고쳤으면 changed, 손대지 않았지만 구조상 필요하면 other.',
     'edges는 import나 호출의 방향(from이 to를 쓴다)이다. 코드 작업이 없었으면 nodes와 edges는 빈 배열로 둬라.',
     ...(listable(files).length === 0
       ? []
@@ -151,8 +158,10 @@ export const summaryPrompt = (lastAnswer: string, files: string[]) =>
 
 export type Parsed = {
   goal: string
+  now: string
   decisions: string[]
   open: string[]
+  tasks: Task[]
   nodes: DiagramNode[]
   edges: DiagramEdge[]
 }
@@ -161,6 +170,22 @@ const NODES_MAX = 8
 const STATUSES = new Set(['new', 'changed', 'other'])
 
 const text = (value: unknown, max: number) => (typeof value === 'string' ? cap(oneLine(value), max) : '')
+
+const TASKS_MAX = 12
+const TASK_STATUSES = new Set(['done', 'doing', 'waiting'])
+
+// The session's work in order; a task needs a name, and a status the pane
+// does not know is taken as going on.
+const tasksOf = (value: unknown): Task[] =>
+  (Array.isArray(value) ? value : [])
+    .filter((raw): raw is Record<string, unknown> => typeof raw === 'object' && raw !== null)
+    .map(one => ({
+      name: text(one.name, LINE_MAX),
+      status: typeof one.status === 'string' && TASK_STATUSES.has(one.status) ? (one.status as Task['status']) : 'doing',
+      detail: text(one.detail, LINE_MAX),
+    }))
+    .filter(task => task.name !== '')
+    .slice(-TASKS_MAX)
 
 // Keeps nodes with a distinct id and a label, and edges between two of them.
 // A node naming a file the tools changed is at least `changed`.
@@ -174,7 +199,7 @@ const diagramOf = (record: Record<string, unknown>, changed: Set<string>) => {
     if (id === '' || label === '' || nodes.some(node => node.id === id)) continue
     const said = typeof one.status === 'string' && STATUSES.has(one.status) ? (one.status as DiagramNode['status']) : 'other'
     const status = said === 'other' && changed.has(baseName(label)) ? 'changed' : said
-    nodes.push({ id, label, note: text(one.note, 24), status })
+    nodes.push({ id, label, note: text(one.note, 40), status })
   }
 
   const ids = new Set(nodes.map(node => node.id))
@@ -213,7 +238,14 @@ export const parseSummary = (reply: string, files: string[] = []): Parsed | null
 
     const changed = new Set(files.map(baseName))
 
-    return { goal, decisions: strings(record.decisions, 5), open: strings(record.open, 4), ...diagramOf(record, changed) }
+    return {
+      goal,
+      now: text(record.now, LINE_MAX),
+      decisions: strings(record.decisions, 5),
+      open: strings(record.open, 4),
+      tasks: tasksOf(record.tasks),
+      ...diagramOf(record, changed),
+    }
   } catch {
     return null
   }

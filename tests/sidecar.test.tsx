@@ -867,7 +867,7 @@ test('a closed pane stays closed through a reload and is saved so', async ($, on
 test('a resumed session the person had closed does not open its pane', async ($, on) => {
   const { opened } = panes(on)
   starts(on)
-  const closed = { ...snapshot('log-2 summary-2 stats-2 folded-3'), folded: { choices: false, summary: false, diagram: false, log: false, open: '', isClosed: true } }
+  const closed = { ...snapshot('log-2 summary-3 stats-2 folded-4'), folded: { choices: false, summary: false, diagram: false, log: false, open: '', isClosed: true, tab: 'flow' } }
   fakeStore(on, 's1', new Map([['session:s1', closed]]))
 
   await $.session.start(START)
@@ -907,7 +907,7 @@ test('without a model the gist is the answer’s first sentence', async ($, on) 
   await ui.unmount()
 })
 
-test('the summary refreshes on the button and every fifth turn, with changed files', async ($, on) => {
+test('the summary refreshes on the button and every third turn, with changed files', async ($, on) => {
   mock.clock(on, { now: NOW })
   let forks = 0
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
@@ -939,10 +939,10 @@ test('the summary refreshes on the button and every fifth turn, with changed fil
   expect((await ui.find({ type: 'Text', text: '  • Q 버튼은 세로' }))?.props.color).toBeUndefined()
   expect((await ui.find({ key: 'fold-summary' }))?.props.label).toMatch(/^▼ 요약 · \d\d:\d\d 갱신$/)
 
-  for (const id of ['t1', 't2', 't3', 't4']) await turn($, id, id, '답')
+  for (const id of ['t1', 't2']) await turn($, id, id, '답')
   expect(forks).toBe(1)
-  await turn($, 't5', 't5', '답')
-  // The fifth turn's refresh runs after its hook returns.
+  await turn($, 't3', 't3', '답')
+  // The third turn's refresh runs after its hook returns.
   for (let i = 0; i < 500 && forks < 2; i += 1) await Promise.resolve()
   expect(forks).toBe(2)
 
@@ -1135,7 +1135,7 @@ test('the session saves its pane once more as it ends', async ($, on) => {
   const held = fakeStore(on, 's1')
 
   await $.session.end({ reason: 'prompt_input_exit', sessionId: 's1', resume: { id: 's1' } })
-  expect((held.get('session:s1') as { shape?: string } | undefined)?.shape).toBe('log-2 summary-2 stats-2 folded-3')
+  expect((held.get('session:s1') as { shape?: string } | undefined)?.shape).toBe('log-2 summary-3 stats-2 folded-4')
 })
 
 for (const reason of ['clear', 'resume'] as const) {
@@ -1191,15 +1191,15 @@ const snapshot = (shape: string) => ({
     { id: 't1', at: NOW, prompt: '로그인 고쳐', from: 'person', gist: '로그인 수정', detail: '', status: 'done' },
     { id: 't2', at: NOW, prompt: '테스트 돌려', from: 'person', gist: '', detail: '', status: 'working' },
   ],
-  summary: { goal: '로그인 흐름 정리', decisions: [], open: [], nodes: [], edges: [], at: NOW, isBusy: true, error: '' },
+  summary: { goal: '로그인 흐름 정리', now: '', decisions: [], open: [], tasks: [], nodes: [], edges: [], at: NOW, isBusy: true, error: '' },
   stats: { startedAt: NOW, turns: 2, sinceSummary: 0, files: ['/repo/login.ts'], base: 'base', untracked: [] },
-  folded: { choices: false, summary: false, diagram: false, log: false, open: '' },
+  folded: { choices: false, summary: false, diagram: false, log: false, open: '', isClosed: false, tab: 'flow' },
 })
 
 test('a restored session measures git from where it now starts', async ($, on) => {
   host(on)
   starts(on)
-  fakeStore(on, 's1', new Map([['session:s1', snapshot('log-2 summary-2 stats-2 folded-2')]]))
+  fakeStore(on, 's1', new Map([['session:s1', snapshot('log-2 summary-3 stats-2 folded-4')]]))
   on('process.run', (_, e) => {
     const args = e.argv.slice(1).join(' ')
     if (args === 'rev-parse --show-toplevel') return ran('/repo\n')
@@ -1224,7 +1224,7 @@ test('a restored session measures git from where it now starts', async ($, on) =
 test('a reload keeps the pane it holds over the saved one', async ($, on) => {
   mock.clock(on, { now: NOW })
   starts(on)
-  fakeStore(on, 's1', new Map([['session:s1', snapshot('log-2 summary-2 stats-2 folded-2')]]))
+  fakeStore(on, 's1', new Map([['session:s1', snapshot('log-2 summary-3 stats-2 folded-4')]]))
 
   await $.session.start(START)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -1251,7 +1251,7 @@ test('a resumed session keeps every part whose shape still holds', async ($, on)
 })
 
 for (const [how, shape, isBack] of [
-  ['gets its pane back', 'log-2 summary-2 stats-2 folded-2', true],
+  ['gets its pane back', 'log-2 summary-3 stats-2 folded-4', true],
   ['saved by an older version starts empty', 'log-1 summary-1 stats-1 folded-2', false],
 ] as const) {
   test(`a resumed session ${how}`, async ($, on) => {
@@ -1300,6 +1300,8 @@ test('what the models write is drawn without what draws as nothing', async ($, o
         goal: `pane ${esc}다듬기${tag}`,
         decisions: [`버튼은\u200b 세로`],
         open: [`터미널\u3164 확인`],
+        now: `탭\u200b 만드는 중${esc}`,
+        tasks: [{ name: `#29 ${esc}작업 그림`, status: 'doing', detail: `탭${tag} 버튼` }],
         nodes: [{ id: 'r', label: `register${tag}.tsx`, note: `훅\u202e 그리기`, status: 'changed' }],
         edges: [],
       }),
@@ -1316,6 +1318,10 @@ test('what the models write is drawn without what draws as nothing', async ($, o
   expect(await ui.find({ type: 'Text', text: '  • 버튼은 세로' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '  • 터미널 확인' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /↳ 선택지\[31m 정리$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '지금  탭 만드는 중[31m' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^\[진행\] +#29 \[31m작업 그림$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^ +탭 버튼$/ })).toBeDefined()
+  await ui.press({ key: 'tab-files' })
   expect(await ui.find({ type: 'Text', text: /│ register\.tsx/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /│ 훅 그리기/ })).toBeDefined()
   await ui.press({ key: 'entry-t1' })
@@ -1332,11 +1338,47 @@ test('a fork with nothing to read says so', async ($, on) => {
   await ui.unmount()
 })
 
+test('the summary prompt asks for now, the tasks and what each file changed, in cells', () => {
+  const prompt = summaryPrompt('', [])
+  expect(prompt).toContain('"now":')
+  expect(prompt).toContain('"tasks": [{"name":')
+  expect(prompt).toContain('"status": "done|doing|waiting"')
+  // A file's note is what this session changed in it, not what it does.
+  expect(prompt).toContain('이번 세션에 그 파일에서 바꾼 것')
+  expect(prompt).not.toContain('하는 일')
+  // Lengths are terminal cells, Hangul counted twice.
+  expect(prompt).toContain('한글 한 글자는 2칸')
+  expect(prompt).not.toMatch(/\d+자 이내/)
+})
+
+test('a summary reads what is going on now and the tasks in order', () => {
+  const reply = JSON.stringify({
+    goal: '목표',
+    now: '#29 작업 그림 다시 설계 중',
+    tasks: [
+      { name: '#26 다시 묻는 질문 인식', status: 'done', detail: 'parse.ts 고침 · push 끝' },
+      { name: '#27 로그 행', status: 'waiting', detail: '0.5.3 승인 대기' },
+      { name: '이름 없는 상태', status: '??', detail: '' },
+      { status: 'done', detail: '이름이 없다' },
+    ],
+  })
+  const parsed = parseSummary(reply)
+  expect(parsed?.now).toBe('#29 작업 그림 다시 설계 중')
+  expect(parsed?.tasks).toEqual([
+    { name: '#26 다시 묻는 질문 인식', status: 'done', detail: 'parse.ts 고침 · push 끝' },
+    { name: '#27 로그 행', status: 'waiting', detail: '0.5.3 승인 대기' },
+    // A status it does not know is taken as going on.
+    { name: '이름 없는 상태', status: 'doing', detail: '' },
+  ])
+})
+
 test('digest helpers', () => {
   expect(parseSummary('말머리 {"goal": "목표", "decisions": ["a", 3, ""], "open": "x"} 꼬리')).toEqual({
     goal: '목표',
+    now: '',
     decisions: ['a'],
     open: [],
+    tasks: [],
     nodes: [],
     edges: [],
   })
@@ -1458,6 +1500,28 @@ const EDGES = [
   { from: 'p', to: 'g' },
 ]
 
+test('a file the tree reaches twice shows what changed in it both times', () => {
+  const nodes = [
+    { id: 'r', label: 'register.tsx', note: 'hook 연결', status: 'changed' as const },
+    { id: 'p', label: 'parse.ts', note: 'Q 인식 추가', status: 'changed' as const },
+    { id: 'g', label: 'digest.ts', note: '알림 행', status: 'changed' as const },
+    { id: 'w', label: 'width.ts', note: '그대로', status: 'other' as const },
+  ]
+  const edges = [
+    { from: 'r', to: 'p' },
+    { from: 'r', to: 'g' },
+    { from: 'p', to: 'w' },
+    { from: 'g', to: 'w' },
+  ]
+  const lines = layout(nodes, edges, 24).map(plainText)
+  // Narrow enough for the tree.
+  expect(lines[0]).toBe('register.tsx  hook 연결')
+  expect(lines.filter(line => line.includes('width.ts')).map(line => line.trim().replace(/^[│├└─ ]+/, ''))).toEqual([
+    'width.ts  그대로',
+    'width.ts  그대로',
+  ])
+})
+
 test('boxes line up by cells, a Hangul syllable or jamo taking two', () => {
   const lines = layout(NODES, EDGES, 80).map(plainText)
   // Every row's box parts end at the same cell on each of its lines.
@@ -1497,6 +1561,77 @@ test('a row too wide for the pane becomes a tree', () => {
   ])
 })
 
+test("the summary shows what is going on now, under the goal", async ($, on) => {
+  mock.clock(on, { now: NOW })
+  on('model.fork', () => ({
+    value: { isAnswered: true as const, text: JSON.stringify({ goal: '작업 그림 다시 설계', now: '#29 탭 버튼 만드는 중' }), usage: USAGE },
+  }))
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'refresh' })
+
+  const texts = (await ui.findAll({ type: 'Text' })).map(one => one.text)
+  const goal = texts.indexOf('목표  작업 그림 다시 설계')
+  expect(goal).toBeGreaterThan(-1)
+  // Right after the goal and its bold label.
+  expect(texts.indexOf('지금  #29 탭 버튼 만드는 중')).toBe(goal + 2)
+  await ui.unmount()
+})
+
+const TASKS = [
+  { name: '#26 다시 묻는 질문 인식', status: 'done', detail: 'parse.ts 고침 · push 끝' },
+  { name: '#27 에이전트·명령 로그 행', status: 'waiting', detail: 'push 끝 · 0.5.3 승인 대기' },
+  { name: '#29 작업 그림 다시 설계', status: 'doing', detail: '탭 버튼 만드는 중' },
+]
+
+test('the diagram opens on the flow of work, and the files sit behind a tab it remembers', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  on('model.fork', () => ({
+    value: { isAnswered: true as const, text: JSON.stringify({ goal: '목표', tasks: TASKS, nodes: NODES, edges: EDGES }), usage: USAGE },
+  }))
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  const held = fakeStore(on, 's1')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 80 } })
+  await ui.press({ key: 'refresh' })
+
+  expect(await ui.find({ key: 'tab-flow' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /#29 작업 그림 다시 설계/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /│ register\.tsx/ })).toBeUndefined()
+
+  await ui.press({ key: 'tab-files' })
+  expect(await ui.find({ type: 'Text', text: /│ register\.tsx/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /#29 작업 그림 다시 설계/ })).toBeUndefined()
+
+  // The tab chosen is kept with the folds.
+  await $.session.end({ reason: 'prompt_input_exit', sessionId: 's1', resume: { id: 's1' } })
+  expect((held.get('session:s1') as { folded?: { tab?: string } }).folded?.tab).toBe('files')
+  await ui.unmount()
+})
+
+test('the flow of work shows the latest six tasks, the earlier folded, each status in its colour', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  const tasks = [
+    ...['하나', '둘', '셋', '넷', '다섯', '여섯'].map(name => ({ name, status: 'done', detail: '' })),
+    { name: '#27 로그 행', status: 'waiting', detail: '0.5.3 승인 대기' },
+    { name: '#29 작업 그림', status: 'doing', detail: '탭 만드는 중' },
+  ]
+  on('model.fork', () => ({ value: { isAnswered: true as const, text: JSON.stringify({ goal: '목표', tasks }), usage: USAGE } }))
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 60 } })
+  await ui.press({ key: 'refresh' })
+
+  expect(await ui.find({ type: 'Text', text: '앞선 작업 2개' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^\[끝\] +하나$/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^\[끝\] +둘$/ })).toBeUndefined()
+  const done = await ui.find({ type: 'Text', text: /^\[끝\] +셋$/ })
+  const waiting = await ui.find({ type: 'Text', text: /^\[대기\] +#27 로그 행$/ })
+  const doing = await ui.find({ type: 'Text', text: /^\[진행\] +#29 작업 그림$/ })
+  expect(done?.props.dimColor).toBe(true)
+  expect(waiting?.props.color).toBe('warning')
+  expect(doing?.props.bold).toBe(true)
+  // The names line up past their marks, Hangul taking two cells.
+  expect(cells(done?.text.split('셋')[0] ?? '')).toBe(cells(doing?.text.split('#29')[0] ?? ''))
+  await ui.unmount()
+})
+
 test('the summary refresh draws the work diagram, coloured by status', async ($, on) => {
   mock.clock(on, { now: NOW })
   on('model.fork', () => ({
@@ -1507,9 +1642,10 @@ test('the summary refresh draws the work diagram, coloured by status', async ($,
     },
   }))
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 80 } })
-  expect(await ui.find({ type: 'Text', text: '요약을 갱신하면 함께 그려요.' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '요약을 갱신하면 함께 정리해요.' })).toBeDefined()
 
   await ui.press({ key: 'refresh' })
+  await ui.press({ key: 'tab-files' })
   expect(await ui.find({ type: 'Text', text: /│ register\.tsx/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '새로 만듦 · 고침' })).toBeDefined()
 

@@ -52,8 +52,8 @@ Update with `claude plugin update sidecar@kaameo-lab`, remove with `claude plugi
 | Section | What it shows | When it changes |
 | --- | --- | --- |
 | **선택지** (options) | The options and questions in the last answer, as buttons. Pressing one sends it as if you had typed it. A recommended answer is marked `✓추천`. | Each time Claude finishes an answer |
-| **요약** (summary) | The session's goal, what was decided, what is left, and the files changed this session | Every 5 turns, or when you press `↻ 갱신` |
-| **작업 그림** (diagram) | The files and modules this session created (green) or changed (yellow), as boxes and lines | When the summary is refreshed |
+| **요약** (summary) | The session's goal, what it is doing now, what was decided, what is left, and the files changed this session | Every 3 turns, or when you press `↻ 갱신` |
+| **작업 그림** (diagram) | Two tabs. **작업 흐름** (flow of work) lists the session's tasks in order, each `[끝]` done, `[진행]` going on or `[대기]` waiting, with what it changed and where it stands (the latest 6). **파일** (files) draws the files it created (green) or changed (yellow) as boxes and lines, each with what changed in it. | When the summary is refreshed |
 | **로그** (log) | One row per turn: what you asked and what Claude did. Press a row to unfold its detail lines. | Each time a turn ends |
 
 <p align="center">
@@ -89,7 +89,7 @@ Q blocks and numbered questions are answered one by one, by picking an option or
 | What it does | How |
 | --- | --- |
 | Writes one log line per turn | One Haiku call (`$.model.complete`) |
-| Writes the summary and the diagram | One fork of the current session (`$.model.fork`) every 5 turns, or on `↻ 갱신` |
+| Writes the summary and the diagram | One fork of the current session (`$.model.fork`) every 3 turns, or on `↻ 갱신` |
 | Finds the changed files | `git stash create`, `git diff --name-only`, `git ls-files --others`. It does not change the work tree, the index or the stash list. |
 | Saves and restores the pane | Per session, the log (last 30 rows), the summary and the changed files, in a store of sidecar's own inside the Claude Code settings folder. Only the latest 20 sessions are kept. |
 | Sends answers | With `$.prompt.submit`, only when you press a button. |

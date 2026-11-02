@@ -164,7 +164,8 @@ const tree = (nodes: DiagramNode[], edges: DiagramEdge[], columns: number): Line
     lines.push([
       { text: lead + branch },
       { text: label, ...(tone ? { tone } : {}) },
-      ...(isAgain ? [{ text: '  (위)', tone: 'dim' as const }] : note !== '' ? [{ text: `  ${note}`, tone: 'dim' as const }] : []),
+      // Again under another file, it says again what changed in it.
+      ...(note !== '' ? [{ text: `  ${note}`, tone: 'dim' as const }] : []),
     ])
     if (isAgain) return
     seen.add(id)

@@ -32,8 +32,10 @@ const EMPTY_VIEW: View = {
 const NO_ENTRIES: Entry[] = []
 const EMPTY_SUMMARY: Summary = {
   goal: '',
+  now: '',
   decisions: [],
   open: [],
+  tasks: [],
   nodes: [],
   edges: [],
   at: 0,
@@ -41,12 +43,12 @@ const EMPTY_SUMMARY: Summary = {
   error: '',
 }
 const EMPTY_STATS: Stats = { startedAt: 0, turns: 0, sinceSummary: 0, files: [], base: '', untracked: [] }
-const EMPTY_FOLDED: Folded = { choices: false, summary: false, diagram: false, log: false, open: '', isClosed: false }
+const EMPTY_FOLDED: Folded = { choices: false, summary: false, diagram: false, log: false, open: '', isClosed: false, tab: 'flow' }
 
 // Change a tag when its type's fields change: it declines what an earlier
 // version stored, which outlives a reload.
 const view = atom({ plugin: 'sidecar', key: 'view' } as const, EMPTY_VIEW, { shape: 'view-4' })
-const SHAPES = { log: 'log-2', summary: 'summary-2', stats: 'stats-2', folded: 'folded-3' } as const
+const SHAPES = { log: 'log-2', summary: 'summary-3', stats: 'stats-2', folded: 'folded-4' } as const
 const log = atom({ plugin: 'sidecar', key: 'log' } as const, NO_ENTRIES, { shape: SHAPES.log })
 const summary = atom({ plugin: 'sidecar', key: 'summary' } as const, EMPTY_SUMMARY, { shape: SHAPES.summary })
 const stats = atom({ plugin: 'sidecar', key: 'stats' } as const, EMPTY_STATS, { shape: SHAPES.stats })
@@ -61,12 +63,17 @@ const PANE = 'sidecar'
 const TITLE = 'Sidecar'
 const RECOMMEND = '추천대로'
 const MARK = ' ✓추천'
-const SUMMARY_EVERY = 5
+const SUMMARY_EVERY = 3
 const LOG_KEPT = 200
 const LOG_SHOWN = 30
 const GIT_TIMEOUT_MS = 5000
 // Cells left blank down the pane's left edge.
 const MARGIN = 2
+// The flow of work shows the latest tasks; the earlier ones fold into a line.
+const FLOW_SHOWN = 6
+const TASK_MARK = { done: '[끝]', doing: '[진행]', waiting: '[대기]' } as const
+// The cells a task's mark takes with the space after it, so names line up.
+const MARK_CELLS = 7
 
 // The last answer of the main loop: a fork's transcript ends before it.
 let lastAnswer = ''
@@ -725,6 +732,11 @@ export const register: Register = on => {
                 <Text bold>목표</Text>  {fit(s.goal, columns - 2)}
               </Text>
             )}
+            {s.at > 0 && s.now !== '' && (
+              <Text>
+                <Text bold>지금</Text>  {fit(s.now, columns - 2)}
+              </Text>
+            )}
             {s.at > 0 && s.decisions.length > 0 && <Text bold>결정</Text>}
             {s.at > 0 && s.decisions.map(item => <Text>  • {fit(item, columns - 4)}</Text>)}
             {files.length > 0 && (
@@ -740,6 +752,49 @@ export const register: Register = on => {
 
         {heading('diagram', '작업 그림')}
         {!f.diagram && (
+          <Box key="tabs" flexDirection="row" gap={2}>
+            {(['flow', 'files'] as const).map(tab => (
+              <Button
+                key={`tab-${tab}`}
+                plain
+                label={tab === 'flow' ? '작업 흐름' : '파일'}
+                onPress={() => update($, folded, (cur): Folded => ({ ...cur, tab }))}
+              >
+                <Text bold={f.tab === tab} color={f.tab === tab ? 'claude' : undefined} dimColor={f.tab !== tab}>
+                  {f.tab === tab ? `[${tab === 'flow' ? '작업 흐름' : '파일'}]` : ` ${tab === 'flow' ? '작업 흐름' : '파일'} `}
+                </Text>
+              </Button>
+            ))}
+          </Box>
+        )}
+        {!f.diagram && f.tab === 'flow' && (
+          <Box flexDirection="column">
+            {s.tasks.length === 0 && (
+              <Text dimColor>{s.at > 0 ? '아직 정리된 작업이 없어요.' : '요약을 갱신하면 함께 정리해요.'}</Text>
+            )}
+            {s.tasks.length > FLOW_SHOWN && <Text dimColor>앞선 작업 {s.tasks.length - FLOW_SHOWN}개</Text>}
+            {s.tasks.slice(-FLOW_SHOWN).map(task => {
+              const mark = TASK_MARK[task.status]
+              const gap = ' '.repeat(MARK_CELLS - cells(mark))
+
+              return (
+                <Box flexDirection="column">
+                  <Text
+                    bold={task.status === 'doing'}
+                    color={task.status === 'waiting' ? 'warning' : undefined}
+                    dimColor={task.status === 'done'}
+                  >
+                    {mark}
+                    {gap}
+                    {fit(task.name, body - MARK_CELLS)}
+                  </Text>
+                  {task.detail !== '' && <Text dimColor>{`${' '.repeat(MARK_CELLS)}${fit(task.detail, body - MARK_CELLS)}`}</Text>}
+                </Box>
+              )
+            })}
+          </Box>
+        )}
+        {!f.diagram && f.tab === 'files' && (
           <Box flexDirection="column">
             {s.nodes.length === 0 && (
               <Text dimColor>{s.at > 0 ? '그릴 코드 작업이 아직 없어요.' : '요약을 갱신하면 함께 그려요.'}</Text>

@@ -46,10 +46,18 @@ export type DiagramNode = { id: string; label: string; note: string; status: 'ne
 // An import or call from one box to another.
 export type DiagramEdge = { from: string; to: string }
 
+// One piece of the session's work, as the summary lists them in order: what
+// it is, whether it is done, going on, or waiting on the person, and what it
+// changed or where it stands.
+export type Task = { name: string; status: 'done' | 'doing' | 'waiting'; detail: string }
+
 export type Summary = {
   goal: string
+  // What the session is doing or waiting on now.
+  now: string
   decisions: string[]
   open: string[]
+  tasks: Task[]
   nodes: DiagramNode[]
   edges: DiagramEdge[]
   // When it was made; 0 before the first.
@@ -83,6 +91,8 @@ export type Folded = {
   open: string
   // Closed by the person: no answer opens it again until /sidecar.
   isClosed: boolean
+  // The diagram's tab: the flow of work, or the files it touched.
+  tab: 'flow' | 'files'
 }
 
 // What the store keeps of one session so a resumed one draws its pane
