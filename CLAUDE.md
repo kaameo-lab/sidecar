@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 3. **작업 그림**: a box-drawing diagram of the files/modules the session touched.
 4. **로그**: one row per main-loop turn with a Haiku-written gist.
 
-The UI text and model prompts are Korean. There is no package.json and no build step. The host binary provides the `claude-code` and `claude-code/testing` modules.
+The UI text and model prompts are Korean. `README.md` (Korean, the main one) and `README.en.md` keep the same sections: change one, change the other. There is no package.json and no build step. The host binary provides the `claude-code` and `claude-code/testing` modules.
 
 ## Commands
 

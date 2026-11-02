@@ -1,3 +1,5 @@
+**한국어** | [English](README.en.md)
+
 # sidecar
 
 [![Release](https://img.shields.io/github/v/release/kaameo-lab/sidecar)](https://github.com/kaameo-lab/sidecar/releases/latest)
