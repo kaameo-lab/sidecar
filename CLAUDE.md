@@ -18,9 +18,10 @@ The UI text and model prompts are Korean. There is no package.json and no build 
 ```sh
 claude plugin test          # runs every *.test.ts(x) under the folder; exits 1 on failure
 claude plugin validate .    # checks .claude-plugin/plugin.json and hooks/hooks.json
+npx -p typescript@5.6.3 tsc --noEmit -p .   # typecheck; there is no local tsc
 ```
 
-The repo is also its own marketplace (`kaameo-lab`, `.claude-plugin/marketplace.json`, `"source": "./"`), so users install with `claude plugin install sidecar@kaameo-lab`. To release, bump `version` in both `plugin.json` and `marketplace.json`, commit, then `claude plugin tag .` and push the tag.
+The repo is also its own marketplace (`kaameo-lab`, `.claude-plugin/marketplace.json`, `"source": "./"`), so users install with `claude plugin install sidecar@kaameo-lab`. To release, rename CHANGELOG's `## 다음 버전` to `## <version> — <date>`, bump `version` in both `plugin.json` and `marketplace.json`, commit, then `claude plugin tag .` (`--force` when untracked files sit in the tree) and push the tag; the GitHub Release body is that CHANGELOG section. The tag push and `gh release create` may be refused by the permission check; then hand the user the two commands.
 
 `claude plugin test` takes only a folder and has no option to pick one test by name. All tests are in `tests/sidecar.test.tsx`. `tsconfig.json` extends `.claude-plugin/types/tsconfig.json`, which the host generates and which is not checked in.
 
@@ -37,15 +38,22 @@ The repo is also its own marketplace (`kaameo-lab`, `.claude-plugin/marketplace.
   - `prompt.submit`: separates the plugin's own submissions (`origin.kind === 'plugin'`) from the user's typing.
   - `ui.render` (`component: 'Pane'`): draws the whole pane from atom state every time. Components come from `$.ui.resolve(e)`, and `Input` is optional because some surfaces don't have it.
 - **Pure modules**: these hold no state and can be tested without the engine.
-  - `hooks/parse.ts`: finds the options and Q-blocks in markdown. A Q line may carry a short `( … )` or `[ … ]` note between its number and separator, as Claude writes when asking again; the note stays out of the title. Lists inside code fences are skipped. A numbered list only counts when there's a `?` nearby, or the line right before it offers it ("중에서", "골라", "방법은 두 가지", …) and is not a steps heading. When there are several lists, the last one wins. With no list, lettered headings (`**A. …**`, `### B. …`) each over a paragraph count when the answer's last lines ask to pick; numbered headings do not, since reports number their sections. `parseNumbered` takes a closing numbered list whose every item asks (`?`) as items `1번`, `2번`, answered as `1번: …`.
+  - `hooks/parse.ts`: finds the options and Q-blocks in markdown. A Q line may carry a short `( … )` or `[ … ]` note between its number and separator, inside the bold or after it, or a prime on the number (`Q2'`, `Q2′`, `Q2’`) that names the same number, as Claude writes when asking again; the note stays out of the title. After ❓ or ❔ any capital letter numbers a question too (`❓ **G1 - …**`, kept as `G1`); without it only Q does, since `D12` or `S3` there are mostly decision numbers and list items. Lists inside code fences are skipped. A numbered list only counts when there's a `?` nearby, or the line right before it offers it ("중에서", "골라", "방법은 두 가지", …) and is not a steps heading. When there are several lists, the last one wins. With no list, lettered headings (`**A. …**`, `### B. …`) each over a paragraph count when the answer's last lines ask to pick; numbered headings do not, since reports number their sections. `parseNumbered` takes a closing numbered list whose every item asks (`?`) as items `1번`, `2번`, answered as `1번: …`.
   - `hooks/digest.ts`: the gist and summary prompts, and lenient parsing of what the model returns (it slices JSON out of surrounding prose). Every line it hands the pane passes `oneLine`, which runs `visible`: the host refuses a whole pane whose text holds a control character.
   - `hooks/diagram.ts`: ranks the graph by longest path and draws box rows joined by a junction bus. If a rank is wider than the pane, it switches to a tree view.
   - `hooks/width.ts`: `cells`/`fit`. Hangul, CJK and emoji count as two terminal cells. `visible` takes out what a terminal draws as nothing (control, format, private-use and unassigned code points, every default-ignorable one such as the tag block, variation selectors and Hangul fillers, and the blank braille cell), and stacks combining marks two deep at most. Emoji stay whole: one U+FE0F right after a pictograph, and a zero-width joiner between an emoji's parts. The parser's `clean` runs every option, suggestion, title and question through it, so nothing the person never saw rides along when a press sends them as the user's words.
+- A call that passes `$` may not use spread arguments (`track($, ...paths)` makes the host refuse the whole module); helpers take arrays.
 - **Terminal width matters everywhere.** Truncate with `fit()`, not `.slice()`. Keep `cells()` widths in mind. Frame diagrams with box-drawing characters only, because glyphs like ● or ▼ take one cell in some terminals and two in others (see the header of `diagram.ts`).
 
 ## Tests
 
 Tests use `test`, `expect` and `mock` from `claude-code/testing`. An engine test gets `($, on)`. It stubs host events with `on('turn.complete' | 'model.complete' | 'model.fork' | 'ui.open' | …, handler)`. A stub for a call on `$` (`process.run`, `command.register`, `model.fork`, …) answers `{ value: … }`; one that answers otherwise makes the plugin's hook skip silently. Tests drive turns through `$.turn.start` and `$.turn.complete`, and mount the pane with `$.ui.mount({ ...PANE, surface })`. Buttons are found and pressed by their React `key` (`choice-b`, `pick-Q3-a`, `edit-Q2` and the field it opens, `answer-Q2`, `send-all`, `refresh`, …), so a key rename breaks tests. UI tests run once per surface (`terminal`, `desktop`).
+
+Helpers at the top of the test file: `host(on)` (clock, turns, `ui.open`, returns what was sent), `starts(on)`, `ran()`, `drain()` for work a hook starts without waiting (`sweep`, `describe`, saves), and `turn($, turnId, text, said)` for one main-loop turn. Further down, before the pane tests, `answer($, text)` is a turn whose answer is `text`; `fakeGit` and `fakeStore` sit with the git and save tests.
+
+Test-kit gotchas: `find({ text: '…' })` matches by inclusion (use `/^…$/` for exact); a `Text` keeps no `key` (find it by its text; `findAll({})` gives document order); `ui.input` submits unless `kind: 'change'`; a mod's `$.ui.focus` never reaches the test's hooks, so focus moves are checked by hand.
+
+Parser rules are measured before they widen: run `hooks/parse.ts` under `node` (copy it with `width.ts`, adding `.ts` to the import) over the assistant answers in `~/.claude/projects/*/*.jsonl`, and look at every answer the change newly takes.
 
 ## Agent skills
 
