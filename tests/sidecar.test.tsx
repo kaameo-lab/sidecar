@@ -317,7 +317,7 @@ test('a note inside the bold around the number still makes a question', () => {
   ])
 })
 
-const LETTERED = [
+const G_NUMBERED = [
   '정할 것은 아래 G1~G2입니다.',
   '',
   '---',
@@ -335,27 +335,27 @@ const LETTERED = [
 ].join('\n')
 
 test('another capital letter numbers a question when ❓ leads the line', () => {
-  expect(parseQuestions(LETTERED)?.map(item => [item.id, item.title, item.suggestion])).toEqual([
+  expect(parseQuestions(G_NUMBERED)?.map(item => [item.id, item.title, item.suggestion])).toEqual([
     ['G1', 'Swagger 설정을 둘 곳', '예를 권합니다.'],
     ['G2', 'Bearer 버튼을 켜는 방식', '설정 키 방식을 권합니다.'],
   ])
 })
 
 test('without ❓ only Q numbers a question, and a Q in a sentence is none', () => {
-  expect(parseQuestions(LETTERED.replace(/[❓❔] /g, ''))).toBeNull()
+  expect(parseQuestions(G_NUMBERED.replace(/[❓❔] /g, ''))).toBeNull()
   expect(parseQuestions('D12: 결정 기록은 어디에 둘까요?\n➡️ ADR에 둡니다.')).toBeNull()
   expect(parseQuestions('? G1 - 범위: 지울까요?')).toBeNull()
   expect(parseQuestions('Q2는 a로 갈까요?\n➡️ 예.')).toBeNull()
 })
 
 test('a prime on the number asks that number again', () => {
-  const ids = (line: string) => parseQuestions(`❓ Q1 - 이름: 바꿀까요?\n\n${line}\n➡️ 예.`)?.map(item => [item.id, item.title])
-  expect(ids("❓ Q2' - 범위: 합의 항목만 남길까요?")).toEqual([['Q1', '이름'], ['Q2', '범위']])
-  expect(ids('❓ **Q2′** - **범위**: 합의 항목만 남길까요?')).toEqual([['Q1', '이름'], ['Q2', '범위']])
-  expect(ids('❓ Q2’ (다시) - 범위: 합의 항목만 남길까요?')).toEqual([['Q1', '이름'], ['Q2', '범위']])
+  const titled = (line: string) => parseQuestions(`❓ Q1 - 이름: 바꿀까요?\n\n${line}\n➡️ 예.`)?.map(item => [item.id, item.title])
+  expect(titled("❓ Q2' - 범위: 합의 항목만 남길까요?")).toEqual([['Q1', '이름'], ['Q2', '범위']])
+  expect(titled('❓ **Q2′** - **범위**: 합의 항목만 남길까요?')).toEqual([['Q1', '이름'], ['Q2', '범위']])
+  expect(titled('❓ Q2’ (다시) - 범위: 합의 항목만 남길까요?')).toEqual([['Q1', '이름'], ['Q2', '범위']])
   // Asked again in the same answer, the primed one takes the place of the first.
-  expect(parseQuestions("❓ Q2 - 범위: 지울까요?\n➡️ 예.\n\n❓ Q2' - 범위: 옮길까요?\n➡️ 예.")?.map(item => item.title)).toEqual(['범위'])
-  expect(parseQuestions("❓ Q2 - 범위: 지울까요?\n➡️ 예.\n\n❓ Q2' - 범위: 옮길까요?\n➡️ 아니요.")?.map(item => item.suggestion)).toEqual(['아니요.'])
+  const again = "❓ Q2 - 범위: 지울까요?\n➡️ 예.\n\n❓ Q2' - 범위: 옮길까요?\n➡️ 아니요."
+  expect(parseQuestions(again)?.map(item => [item.id, item.suggestion])).toEqual([['Q2', '아니요.']])
 })
 
 test('a Q line that asks nothing is no question', () => {
@@ -427,7 +427,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
   test(`a question numbered with another letter goes out under that number (${surface})`, async ($, on) => {
     const sent = host(on)
 
-    await answer($, LETTERED)
+    await answer($, G_NUMBERED)
     const ui = await $.ui.mount({ ...PANE, surface })
 
     expect((await ui.find({ type: 'Text', text: /^G1 / }))?.text).toBe('G1 Swagger 설정을 둘 곳')

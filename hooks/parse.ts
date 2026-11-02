@@ -139,7 +139,7 @@ const headedOf = (lines: string[]): Parsed | null => {
 // "❓ Q1 - title: body", "**Q2.** body", "- Q3) body", and with a short note
 // after the number, as Claude adds asking again: "❓ Q10 (다시) - title",
 // "❓ **Q2 (다시 설명)** - title", or a prime on the number: "❓ Q2' - title".
-// After ❓ another capital letter may number it too: "❓ **G1 - title**: body"
+// After ❓ or ❔ another capital letter may number it too: "❓ **G1 - title**: body"
 const QUESTION =
   /^\s*(?:[-*+>]\s+)?(?:[❓❔]\s*(?:\*\*|__)?|\??\s*(?:\*\*|__)?(?=Q))([A-Z])(\d{1,2})['′’]?(?:\*\*|__)?(?:\s*(?:\([^)\n]{1,24}\)|\[[^\]\n]{1,24}\]))?(?:\*\*|__)?\s*[-–—:.)]\s*(\S.*)$/
 // "➡️ 예. ...", "→ ...", "추천: ..."
