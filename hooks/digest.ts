@@ -40,12 +40,21 @@ export const noticeLine = (text: string) => {
   return cap(oneLine(first ?? ''), 200)
 }
 
-// The first line of what was asked, for the log row.
-export const promptLine = (text: string) => {
-  const unwrapped = text.replace(/<\/?command-[a-z]+>/g, '')
-  const first = unwrapped.split('\n').find(line => line.trim() !== '') ?? ''
+// What was pasted into a prompt, as the engine wraps it:
+// <pasted_content id="0e2f">…</pasted_content id="0e2f">
+const PASTE = /<pasted_content\b[^>]*>([\s\S]*?)<\/pasted_content\b[^>]*>/g
 
-  return cap(oneLine(commandOf(text) ?? first), 200)
+const firstLine = (text: string) => text.split('\n').find(line => line.trim() !== '')
+
+// The first line of what was asked, for the log row: what the person typed,
+// or for a prompt that is only a paste, the paste's first line marked so.
+export const promptLine = (text: string) => {
+  const typed = text.replace(PASTE, '').replace(/<\/?command-[a-z]+>/g, '')
+  const first = firstLine(typed)
+  const pastes = [...text.matchAll(PASTE)].map(match => match[1] ?? '')
+  if (first === undefined && pastes.length > 0) return cap(oneLine(`붙여넣음: ${firstLine(pastes.join('\n')) ?? ''}`), 200)
+
+  return cap(oneLine(commandOf(text) ?? first ?? ''), 200)
 }
 
 export const gistPrompt = (prompt: string, answer: string) =>

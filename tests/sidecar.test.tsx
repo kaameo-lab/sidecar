@@ -1262,6 +1262,20 @@ test('digest helpers', () => {
   expect(promptLine('<command-message>sidecar</command-message> 열어 줘')).toBe('sidecar 열어 줘')
 })
 
+test('a prompt that is only a paste reads as what was pasted', () => {
+  const pasted = ['', '', '<pasted_content id="0e2f">', '', '  ❓ G1 - 설정을 둘 곳  ', '- 기본 문서', '</pasted_content id="0e2f">', ''].join('\n')
+  expect(promptLine(pasted)).toBe('붙여넣음: ❓ G1 - 설정을 둘 곳')
+  // Two pastes and nothing typed: the first paste's first line.
+  expect(promptLine(`${pasted}\n<pasted_content id="1a2b">\n둘째 글\n</pasted_content id="1a2b">`)).toBe('붙여넣음: ❓ G1 - 설정을 둘 곳')
+})
+
+test('words typed around a paste are what the row shows', () => {
+  const paste = '<pasted_content id="83a1">\n❓ G1 - 설정을 둘 곳\n</pasted_content id="83a1">'
+  expect(promptLine(`\n\n${paste}\n\n이것도 안잡힘.`)).toBe('이것도 안잡힘.')
+  expect(promptLine(`이거 봐 줘\n${paste}`)).toBe('이거 봐 줘')
+  expect(promptLine(`${paste}\n\n이건 안 잡힘.\n\n\`\`\`\n${paste}\n\`\`\`\n\n이것도.`)).toBe('이건 안 잡힘.')
+})
+
 const NOTICE = [
   '<task-notification>',
   '<task-id>a2bd1b99</task-id>',
