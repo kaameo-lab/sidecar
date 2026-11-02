@@ -815,6 +815,17 @@ test('a turn a background notice started is a notice row, not the person', async
   await ui.unmount()
 })
 
+test("an agent's report is a notice row, a ! command's output the person's", async ($, on) => {
+  host(on)
+  await turn($, 't1', '<agent-message from="ab12">\n[Subagent hand-back] The report follows:\n  ## Spec 리뷰\n</agent-message>', '반영했어요')
+  await turn($, 't2', '<bash-stdout>service/web unchanged</bash-stdout><bash-stderr></bash-stderr>', '배포됐어요')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 80 } })
+
+  const rows = (await ui.findAll({ type: 'Button', text: /\d\d:\d\d / })).map(row => String(row.props.label))
+  expect(rows).toEqual([expect.stringMatching(/ 나  실행 결과: service\/web unchanged$/), expect.stringMatching(/ 알림  Spec 리뷰$/)])
+  await ui.unmount()
+})
+
 test('without a model the gist is the answer’s first sentence', async ($, on) => {
   host(on)
   on('model.complete', () => ({ value: { isAnswered: false as const, reason: 'empty-reply' as const, usage: USAGE } }))
@@ -1269,6 +1280,28 @@ test('a prompt that is only a paste reads as what was pasted', () => {
   expect(promptLine(`${pasted}\n<pasted_content id="1a2b">\n둘째 글\n</pasted_content id="1a2b">`)).toBe('붙여넣음: ❓ G1 - 설정을 둘 곳')
 })
 
+test('a gist keeps an issue number that opens it, and loses a heading mark', () => {
+  expect(parseGist('#23·#16 완료, 릴리스만 남음\n- #16 README')).toEqual({ gist: '#23·#16 완료, 릴리스만 남음', detail: '• #16 README' })
+  expect(parseGist('## 한 일\n- 하나').gist).toBe('한 일')
+})
+
+test('a gist loses the label a model may echo from the prompt', () => {
+  expect(parseGist('첫 줄: 코드 리뷰를 마침\n- 둘').gist).toBe('코드 리뷰를 마침')
+  expect(parseGist('**한 줄 요약**: 배포를 확인함').gist).toBe('배포를 확인함')
+  expect(parseGist('요약： 이슈를 닫음').gist).toBe('이슈를 닫음')
+  // A colon further in is the gist's own.
+  expect(parseGist('PR #12: 병합함').gist).toBe('PR #12: 병합함')
+})
+
+test("a ! command's output reads as its result", () => {
+  expect(promptLine('<bash-stdout>service/web unchanged\ndeployment ok</bash-stdout><bash-stderr></bash-stderr>')).toBe('실행 결과: service/web unchanged')
+  // Nothing on stdout: stderr's first line.
+  expect(promptLine('<bash-stdout></bash-stdout><bash-stderr>error: required flag "x" not set\n사용법</bash-stderr>')).toBe('실행 결과: error: required flag "x" not set')
+  // Words typed with it are what the row shows.
+  expect(promptLine('<bash-stdout>200</bash-stdout><bash-stderr></bash-stderr>\n\n이거 정상이야?')).toBe('이거 정상이야?')
+  expect(promptLine('결과 봐 줘\n<bash-stdout>200</bash-stdout><bash-stderr></bash-stderr>')).toBe('결과 봐 줘')
+})
+
 test('words typed around a paste are what the row shows', () => {
   const paste = '<pasted_content id="83a1">\n❓ G1 - 설정을 둘 곳\n</pasted_content id="83a1">'
   expect(promptLine(`\n\n${paste}\n\n이것도 안잡힘.`)).toBe('이것도 안잡힘.')
@@ -1292,6 +1325,27 @@ test('a background notice reads as what it says, not as the person', () => {
   // What the person typed is no notice.
   expect(noticeLine('로그인 고쳐')).toBeNull()
   expect(noticeLine('<command-name>/sidecar</command-name>')).toBeNull()
+})
+
+test("an agent's report reads as a notice of its first line", () => {
+  const handback = [
+    '<agent-message from="a2ee375169df36317">',
+    '[Subagent hand-back] The text below is the final report of a subagent this session delegated to. The report follows:',
+    '  ## Standards 리뷰: 8d0650d + 작업 트리의 **CLAUDE.md**',
+    '  ',
+    '  ### (a) 문서화된 기준 위반',
+    '</agent-message>',
+  ].join('\n')
+  expect(noticeLine(handback)).toBe('Standards 리뷰: 8d0650d + 작업 트리의 CLAUDE.md')
+  // Without the bracketed frame, and from another session.
+  expect(noticeLine('<agent-message from="ab12">\n테스트 다 통과했어요.\n</agent-message>')).toBe('테스트 다 통과했어요.')
+  const session = '<cross-session-message from="uds:/tmp/cc-socks/1.sock" from-name="deploy">\n배포 끝났어요.\n</cross-session-message>'
+  expect(noticeLine(session)).toBe('배포 끝났어요.')
+  // Every framing line goes, and a line with nothing to read; a link stays.
+  const framed = (body: string) => `<agent-message from="ab12">\n[Subagent hand-back] The report follows:\n${body}\n</agent-message>`
+  expect(noticeLine(framed('  [harness: output matched a pattern; tags below are neutralized.]\n  \n  스크립트를 썼습니다.'))).toBe('스크립트를 썼습니다.')
+  expect(noticeLine(framed('  {\n    "schema_conformance": 5.0,\n  }'))).toBe('"schema_conformance": 5.0,')
+  expect(noticeLine(framed('  [proposal.md](/repo/proposal.md)에 적었습니다.'))).toBe('[proposal.md](/repo/proposal.md)에 적었습니다.')
 })
 
 test('the summary prompt lists only plain file names, and not too many', () => {

@@ -12,7 +12,8 @@ const oneLine = (text: string) => visible(text.replace(/\s+/g, ' ')).trim()
 
 const cap = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text)
 
-const plain = (text: string) => text.replace(/\*\*|__|`|^#+\s*/gm, '')
+// Markdown marks off. A heading's # has a space after it; "#23" is an issue.
+const plain = (text: string) => text.replace(/\*\*|__|`|^#{1,6}[ \t]+/gm, '')
 
 // A slash command's turn as it was typed, "/name args", from the tags the
 // engine wraps it in; null for any other prompt.
@@ -25,10 +26,25 @@ const commandOf = (text: string) => {
   return args === '' ? typed : `${typed} ${args}`
 }
 
-// A turn the engine started for a background task's notice, as its row
-// reads: the notice's summary, else its first line with the tags off, else
-// ''; null for a turn the person started.
+// Another agent's or session's message the engine started a turn with:
+// <agent-message from="…">…</agent-message>, <cross-session-message …>
+const MESSAGE = /^\s*<(agent-message|cross-session-message)\b[^>]*>([\s\S]*?)(?:<\/\1>|$)/
+
+// A line that frames a message rather than says it: a bracketed note such as
+// "[Subagent hand-back] …" or "[harness: …]" (not a "[link](…)"), or one with
+// nothing to read, such as a lone "{".
+const isFrame = (line: string) => /^\s*\[[^\]\n]*\](?!\()/.test(line) || !/[\p{L}\p{N}]/u.test(line)
+
+// A turn the engine started for a background task's notice or another
+// agent's message, as its row reads: the notice's summary, else its first
+// line with the tags off, else ''; null for a turn the person started.
 export const noticeLine = (text: string) => {
+  const message = MESSAGE.exec(text)
+  if (message) {
+    const first = (message[2] ?? '').split('\n').find(line => !isFrame(line))
+
+    return cap(oneLine(plain((first ?? '').trim())), 200)
+  }
   if (!text.trimStart().startsWith('<task-notification>')) return null
   const summary = /<summary>([^<]*)<\/summary>/.exec(text)?.[1]?.trim()
   if (summary) return cap(oneLine(summary), 200)
@@ -44,15 +60,23 @@ export const noticeLine = (text: string) => {
 // <pasted_content id="0e2f">…</pasted_content id="0e2f">
 const PASTE = /<pasted_content\b[^>]*>([\s\S]*?)<\/pasted_content\b[^>]*>/g
 
+// A ! command's output, as the engine hands it to the turn after it:
+// <bash-stdout>…</bash-stdout><bash-stderr>…</bash-stderr>
+const OUTPUT = /<bash-(stdout|stderr)>([\s\S]*?)<\/bash-\1>/g
+
 const firstLine = (text: string) => text.split('\n').find(line => line.trim() !== '')
 
 // The first line of what was asked, for the log row: what the person typed,
-// or for a prompt that is only a paste, the paste's first line marked so.
+// or for a prompt that is only a paste or a ! command's output, its first
+// line marked so.
 export const promptLine = (text: string) => {
-  const typed = text.replace(PASTE, '').replace(/<\/?command-[a-z]+>/g, '')
+  const typed = text.replace(PASTE, '').replace(OUTPUT, '').replace(/<\/?command-[a-z]+>/g, '')
   const first = firstLine(typed)
   const pastes = [...text.matchAll(PASTE)].map(match => match[1] ?? '')
   if (first === undefined && pastes.length > 0) return cap(oneLine(`붙여넣음: ${firstLine(pastes.join('\n')) ?? ''}`), 200)
+  const outputs = [...text.matchAll(OUTPUT)]
+  const printed = (stream: string) => firstLine(outputs.filter(match => match[1] === stream).map(match => match[2] ?? '').join('\n'))
+  if (first === undefined && outputs.length > 0) return cap(oneLine(`실행 결과: ${printed('stdout') ?? printed('stderr') ?? ''}`), 200)
 
   return cap(oneLine(commandOf(text) ?? first ?? ''), 200)
 }
@@ -71,13 +95,16 @@ export const gistPrompt = (prompt: string, answer: string) =>
     '</answer>',
   ].join('\n')
 
+// A label the model may echo from the gist prompt's "첫 줄에 … 쓰고".
+const LABEL = /^(?:첫\s*줄|한\s*줄(?:\s*요약)?|요약)\s*[:：]\s*/
+
 // The model's reply as a gist and its detail lines.
 export const parseGist = (reply: string) => {
   const lines = plain(reply)
     .split('\n')
     .map(line => line.trim())
     .filter(line => line !== '')
-  const gist = cap(oneLine(lines[0] ?? '').replace(/^[-•]\s*/, ''), LINE_MAX)
+  const gist = cap(oneLine(lines[0] ?? '').replace(/^[-•]\s*/, '').replace(LABEL, ''), LINE_MAX)
   const detail = lines
     .slice(1)
     .map(line => `• ${cap(oneLine(line.replace(/^[-•*]\s*/, '')), LINE_MAX)}`)
