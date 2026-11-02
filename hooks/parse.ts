@@ -137,9 +137,11 @@ const headedOf = (lines: string[]): Parsed | null => {
 }
 
 // "❓ Q1 - title: body", "**Q2.** body", "- Q3) body", and with a short note
-// after the number, as Claude adds asking again: "❓ Q10 (다시) - title"
+// after the number, as Claude adds asking again: "❓ Q10 (다시) - title",
+// "❓ **Q2 (다시 설명)** - title", or a prime on the number: "❓ Q2' - title".
+// After ❓ another capital letter may number it too: "❓ **G1 - title**: body"
 const QUESTION =
-  /^\s*(?:[-*+>]\s+)?(?:❓|❔|\?)?\s*(?:\*\*|__)?Q(\d{1,2})(?:\*\*|__)?(?:\s*(?:\([^)\n]{1,24}\)|\[[^\]\n]{1,24}\]))?\s*[-–—:.)]\s*(\S.*)$/
+  /^\s*(?:[-*+>]\s+)?(?:[❓❔]\s*(?:\*\*|__)?|\??\s*(?:\*\*|__)?(?=Q))([A-Z])(\d{1,2})['′’]?(?:\*\*|__)?(?:\s*(?:\([^)\n]{1,24}\)|\[[^\]\n]{1,24}\]))?(?:\*\*|__)?\s*[-–—:.)]\s*(\S.*)$/
 // "➡️ 예. ...", "→ ...", "추천: ..."
 const SUGGESTION = /^\s*(?:➡️|➡|→|=>|👉|(?:\*\*)?(?:추천|권장|Recommended)(?:\*\*)?\s*[:：])\s*(\S.*)$/
 // The label a suggestion line may repeat after its arrow: "추천 답: ..."
@@ -173,7 +175,7 @@ export const parseQuestions = (answer: string): Item[] | null => {
 
     const match = QUESTION.exec(line)
     if (match) {
-      open = { id: `Q${match[1]}`, body: match[2] ?? '', lines: [] }
+      open = { id: `${match[1]}${match[2]}`, body: match[3] ?? '', lines: [] }
       blocks.push(open)
       continue
     }
