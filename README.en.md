@@ -67,6 +67,7 @@ The pane opens when an interactive session starts and when an answer holds optio
 | Command or key | What it does |
 | --- | --- |
 | `/sidecar` | Open the pane |
+| `/sidecar close` | Close the pane. It stays closed, even when an answer holds options, until `/sidecar` opens it again. |
 | `ctrl+x tab` | Move focus to the pane |
 | `a` `b` `c` … | (With focus in the pane) pick a simple option |
 | Press a section title | Fold or unfold the section |

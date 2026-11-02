@@ -41,18 +41,19 @@ const EMPTY_SUMMARY: Summary = {
   error: '',
 }
 const EMPTY_STATS: Stats = { startedAt: 0, turns: 0, sinceSummary: 0, files: [], base: '', untracked: [] }
-const EMPTY_FOLDED: Folded = { choices: false, summary: false, diagram: false, log: false, open: '' }
+const EMPTY_FOLDED: Folded = { choices: false, summary: false, diagram: false, log: false, open: '', isClosed: false }
 
 // Change a tag when its type's fields change: it declines what an earlier
 // version stored, which outlives a reload.
 const view = atom({ plugin: 'sidecar', key: 'view' } as const, EMPTY_VIEW, { shape: 'view-4' })
-const log = atom({ plugin: 'sidecar', key: 'log' } as const, NO_ENTRIES, { shape: 'log-2' })
-const summary = atom({ plugin: 'sidecar', key: 'summary' } as const, EMPTY_SUMMARY, { shape: 'summary-2' })
-const stats = atom({ plugin: 'sidecar', key: 'stats' } as const, EMPTY_STATS, { shape: 'stats-2' })
-const folded = atom({ plugin: 'sidecar', key: 'folded' } as const, EMPTY_FOLDED, { shape: 'folded-2' })
+const SHAPES = { log: 'log-2', summary: 'summary-2', stats: 'stats-2', folded: 'folded-3' } as const
+const log = atom({ plugin: 'sidecar', key: 'log' } as const, NO_ENTRIES, { shape: SHAPES.log })
+const summary = atom({ plugin: 'sidecar', key: 'summary' } as const, EMPTY_SUMMARY, { shape: SHAPES.summary })
+const stats = atom({ plugin: 'sidecar', key: 'stats' } as const, EMPTY_STATS, { shape: SHAPES.stats })
+const folded = atom({ plugin: 'sidecar', key: 'folded' } as const, EMPTY_FOLDED, { shape: SHAPES.folded })
 
-// The tags of the atoms a session's snapshot holds: change it with theirs.
-const SAVED_SHAPE = 'log-2 summary-2 stats-2 folded-2'
+// The tags of the atoms a session's snapshot holds, as it records them.
+const SAVED_SHAPE = Object.values(SHAPES).join(' ')
 const SESSIONS_KEPT = 20
 
 const PLUGIN = 'sidecar'
@@ -298,19 +299,24 @@ const save = async ($: EngineInterface, ending?: string) => {
 // Draws a resumed session's pane again from what the store kept of it. A
 // turn still running when the process ended counts as stopped. The files it
 // listed stay, but git is measured afresh from here, so what changed between
-// the two processes is not taken for this session's work.
+// the two processes is not taken for this session's work. Each part comes
+// back only if the version that saved it shaped it as this one does.
 const restore = async ($: EngineInterface) => {
   const id = await $.session.id()
   const kept = await $.store.get(savedKey(id))
-  if (typeof kept !== 'object' || kept === null || (kept as Partial<Saved>).shape !== SAVED_SHAPE) return
+  if (typeof kept !== 'object' || kept === null) return
 
   const saved = kept as Saved
-  await update($, log, (): Entry[] =>
-    saved.log.map(entry => (entry.status === 'working' ? { ...entry, status: 'stopped', gist: '중단됨' } : entry)),
-  )
-  await update($, summary, (): Summary => ({ ...saved.summary, isBusy: false }))
-  await update($, stats, (): Stats => ({ ...saved.stats, base: '', untracked: [] }))
-  await update($, folded, (): Folded => saved.folded)
+  const tags = typeof saved.shape === 'string' ? saved.shape.split(' ') : []
+  const holds = (part: keyof typeof SHAPES) => tags.includes(SHAPES[part])
+  if (holds('log')) {
+    await update($, log, (): Entry[] =>
+      saved.log.map(entry => (entry.status === 'working' ? { ...entry, status: 'stopped', gist: '중단됨' } : entry)),
+    )
+  }
+  if (holds('summary')) await update($, summary, (): Summary => ({ ...saved.summary, isBusy: false }))
+  if (holds('stats')) await update($, stats, (): Stats => ({ ...saved.stats, base: '', untracked: [] }))
+  if (holds('folded')) await update($, folded, (): Folded => saved.folded)
 }
 
 // Empties the pane for another conversation in this process; the folds are
@@ -335,7 +341,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'sidecar',
-      description: 'Open the pane with the options, summary and log of this conversation',
+      description: 'Open the pane with the options, summary and log of this conversation (close: /sidecar close)',
     })
     // A reload finds the pane still held; a fresh process finds it empty.
     if ((await read($, stats)).startedAt === 0) await restore($).catch(() => undefined)
@@ -344,7 +350,8 @@ export const register: Register = on => {
     await settle($)
     // A reload mid-refresh leaves nothing running.
     await update($, summary, (s): Summary => ({ ...s, isBusy: false }))
-    if (e.isInteractive) void $.ui.open({ id: PANE, title: TITLE }).catch(() => undefined)
+    // One the person closed stays closed through a reload and a resume.
+    if (e.isInteractive && !(await read($, folded)).isClosed) void $.ui.open({ id: PANE, title: TITLE }).catch(() => undefined)
 
     return next(e)
   })
@@ -362,7 +369,22 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('command.run', { command: 'sidecar' }, async $ => {
+  // A pane the person closed stays closed until /sidecar; one an unload
+  // dropped is not the person's doing.
+  on('ui.close', async ($, e, next) => {
+    if (e.id === PANE && e.origin.kind === 'person') await update($, folded, (f): Folded => ({ ...f, isClosed: true }))
+
+    return next(e)
+  })
+
+  on('command.run', { command: 'sidecar' }, async ($, e) => {
+    if (e.args.trim() === 'close') {
+      await update($, folded, (f): Folded => ({ ...f, isClosed: true }))
+      await $.ui.close({ id: PANE })
+
+      return { text: 'Sidecar pane을 닫았어요.' }
+    }
+    await update($, folded, (f): Folded => ({ ...f, isClosed: false }))
     await $.ui.open({ id: PANE, title: TITLE })
 
     return { text: 'Sidecar pane을 열었어요.' }
@@ -427,7 +449,7 @@ export const register: Register = on => {
 
       return { ...v, phase: 'none', question: '', choices: [], items: [] }
     })
-    if (items || parsed) void $.ui.open({ id: PANE, title: TITLE })
+    if ((items || parsed) && !(await read($, folded)).isClosed) void $.ui.open({ id: PANE, title: TITLE })
 
     const isStopped = e.isAborted || e.answer.trim() === ''
     const entries = await update($, log, (list): Entry[] =>

@@ -81,6 +81,8 @@ export type Folded = {
   log: boolean
   // The log entry shown whole, or ''.
   open: string
+  // Closed by the person: no answer opens it again until /sidecar.
+  isClosed: boolean
 }
 
 // What the store keeps of one session so a resumed one draws its pane

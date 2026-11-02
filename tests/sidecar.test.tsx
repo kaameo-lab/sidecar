@@ -804,6 +804,76 @@ test('each turn becomes a log row with a small model’s gist', async ($, on) =>
   await ui.unmount()
 })
 
+// The person typing /sidecar with `args`.
+const sidecar = ($: Engine, args: string) =>
+  $.command.run({ command: 'sidecar', args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 } })
+
+// The engine as host() gives it, but counting the panes it was asked to
+// open and to close, by id.
+const panes = (on: On) => {
+  mock.clock(on, { now: NOW })
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_, e) => ({ text: e.answer }))
+  const opened: string[] = []
+  const closed: string[] = []
+  on('ui.open', (_, e) => {
+    opened.push(e.id)
+    return { value: { isPlaced: true } }
+  })
+  on('ui.close', (_, e) => {
+    closed.push(e.id)
+    return { value: undefined }
+  })
+  return { opened, closed }
+}
+
+test('/sidecar close closes the pane', async ($, on) => {
+  const { closed } = panes(on)
+
+  const ran = await sidecar($, 'close')
+  expect(closed).toEqual(['sidecar'])
+  expect(ran.text).toBe('Sidecar pane을 닫았어요.')
+})
+
+test('a closed pane stays closed until /sidecar opens it again', async ($, on) => {
+  const { opened } = panes(on)
+
+  await sidecar($, 'close')
+  await turn($, 't1', '로그인 어떻게 할까', GRILL)
+  expect(opened).toEqual([])
+
+  await sidecar($, '')
+  await turn($, 't2', '다시', GRILL)
+  expect(opened).toEqual(['sidecar', 'sidecar'])
+})
+
+test('a closed pane stays closed through a reload and is saved so', async ($, on) => {
+  const { opened } = panes(on)
+  starts(on)
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  const held = fakeStore(on, 's1')
+
+  await $.session.start(START)
+  expect(opened).toEqual(['sidecar'])
+  await sidecar($, 'close')
+  // A reload of the mod raises session.start again.
+  await $.session.start(START)
+  expect(opened).toEqual(['sidecar'])
+
+  await $.session.end({ reason: 'prompt_input_exit', sessionId: 's1', resume: { id: 's1' } })
+  expect((held.get('session:s1') as { folded?: { isClosed?: boolean } }).folded?.isClosed).toBe(true)
+})
+
+test('a resumed session the person had closed does not open its pane', async ($, on) => {
+  const { opened } = panes(on)
+  starts(on)
+  const closed = { ...snapshot('log-2 summary-2 stats-2 folded-3'), folded: { choices: false, summary: false, diagram: false, log: false, open: '', isClosed: true } }
+  fakeStore(on, 's1', new Map([['session:s1', closed]]))
+
+  await $.session.start(START)
+  expect(opened).toEqual([])
+})
+
 test('a turn a background notice started is a notice row, not the person', async ($, on) => {
   host(on)
   await turn($, 't1', '로그인 고쳐', '고쳤어요')
@@ -1065,7 +1135,7 @@ test('the session saves its pane once more as it ends', async ($, on) => {
   const held = fakeStore(on, 's1')
 
   await $.session.end({ reason: 'prompt_input_exit', sessionId: 's1', resume: { id: 's1' } })
-  expect((held.get('session:s1') as { shape?: string } | undefined)?.shape).toBe('log-2 summary-2 stats-2 folded-2')
+  expect((held.get('session:s1') as { shape?: string } | undefined)?.shape).toBe('log-2 summary-2 stats-2 folded-3')
 })
 
 for (const reason of ['clear', 'resume'] as const) {
@@ -1162,6 +1232,20 @@ test('a reload keeps the pane it holds over the saved one', async ($, on) => {
   await ui.press({ key: 'fold-summary' })
   // A reload of the mod raises session.start again.
   await $.session.start(START)
+  expect(await ui.find({ type: 'Text', text: '목표  로그인 흐름 정리' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a resumed session keeps every part whose shape still holds', async ($, on) => {
+  mock.clock(on, { now: NOW })
+  starts(on)
+  // The summary was saved by an older version, the rest by this one.
+  fakeStore(on, 's1', new Map([['session:s1', snapshot('log-2 summary-1 stats-2 folded-2')]]))
+
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /↳ 로그인 수정/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '바뀐 파일  login.ts' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '목표  로그인 흐름 정리' })).toBeUndefined()
   await ui.unmount()
 })
