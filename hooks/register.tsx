@@ -155,7 +155,7 @@ const kept = (v: View, except = ''): Record<string, string> => {
   return { ...v.answers, [v.editing]: text }
 }
 
-const answer = ($: EngineInterface, id: string, text: string) =>
+const saveAnswer = ($: EngineInterface, id: string, text: string) =>
   update($, view, (v): View => {
     const answers = { ...kept(v, id) }
     if (text.trim() === '') delete answers[id]
@@ -543,7 +543,7 @@ export const register: Register = on => {
                       <Button
                         key={`pick-${item.id}-${choice.key}`}
                         label={picks[index]}
-                        onPress={() => answer($, item.id, picked(item, choice, columns))}
+                        onPress={() => saveAnswer($, item.id, picked(item, choice, columns))}
                       >
                         {hasChip && [said(choice), <Text color="success">{MARK}</Text>]}
                       </Button>
@@ -553,7 +553,7 @@ export const register: Register = on => {
                     <Button
                       key={`ok-${item.id}`}
                       label={`✓ ${RECOMMEND}`}
-                      onPress={() => answer($, item.id, recommended(item, columns))}
+                      onPress={() => saveAnswer($, item.id, recommended(item, columns))}
                     />
                   )}
                   <Button
@@ -581,7 +581,7 @@ export const register: Register = on => {
                     rows={rowsFor(v.draft, fieldRoom('저장'))}
                     value={v.draft}
                     onInput={value => update($, view, cur => ({ ...cur, draft: value }))}
-                    onSubmit={value => answer($, item.id, value)}
+                    onSubmit={value => saveAnswer($, item.id, value)}
                   />
                 )}
               </Box>

@@ -86,13 +86,41 @@ Q 블록과 번호 질문은 질문마다 고르거나, `✎ 직접`을 눌러 �
 
 | 하는 일 | 어떻게 |
 | --- | --- |
-| 턴마다 로그 한 줄 만들기 | Haiku 호출 한 번(`$.model.complete`) |
-| 요약과 작업 그림 만들기 | 3턴마다, 또는 `↻ 갱신` 때 현재 세션 fork 한 번(`$.model.fork`) |
-| 바뀐 파일 찾기 | `git stash create`, `git diff --name-only`, `git ls-files --others`. 작업 트리, 인덱스, stash 목록은 바꾸지 않습니다. |
-| pane 저장과 복원 | 세션별로 로그(최근 30줄), 요약, 바뀐 파일을 Claude Code 설정 폴더 안의 sidecar 전용 store에 저장합니다. 최근 20개 세션만 남깁니다. |
-| 답 보내기 | 버튼을 누를 때만 `$.prompt.submit`으로 보냅니다. |
+| 턴마다 로그 한 줄 만들기 | Haiku 호출 한 번(`$.model.complete`). 그 턴의 요청 첫 줄과 답을 보냅니다. |
+| 요약과 작업 그림 만들기 | 3턴마다, 또는 `↻ 갱신` 때 현재 세션 fork 한 번(`$.model.fork`). fork한 대화에 마지막 답과 바뀐 파일 목록을 붙인 요약 프롬프트를 보냅니다. |
+| 바뀐 파일 찾기 | `$.process.run`으로 `git`만 실행합니다. [아래 표](#실행하는-명령)의 다섯 가지뿐이고, 출력은 pane과 아래 store에만 씁니다. 작업 트리, 인덱스, stash 목록은 바꾸지 않습니다. |
+| pane 저장과 복원 | 세션별로 로그(최근 30줄), 요약, 바뀐 파일을 Claude Code 설정 폴더 안의 sidecar 전용 store에 저장합니다. 최근 20개 세션만 남깁니다. 세션 id(`$.session.id`)는 이 저장 키(`session:<id>`)로만 씁니다. |
+| 답 보내기 | 버튼을 누를 때만 `$.prompt.submit`으로 보냅니다. 보내는 글은 미리보기 상자에 보이는 그대로, 고른 선택지나 적은 답과 덧붙일 말뿐입니다. 세션 id, 파일 목록, 로그나 요약은 넣지 않습니다. |
 
-모델 호출은 사용 중인 Claude Code 계정으로 나가고, 그 밖의 네트워크 요청은 하지 않습니다. `claude plugin validate .`가 무엇을 hook하고 호출하는지 그대로 보여 줍니다.
+모델 호출은 사용 중인 Claude Code 계정으로 나가고, 그 밖의 네트워크 요청은 하지 않습니다. git도 이 컴퓨터 안에서만 돕니다. `claude plugin validate .`가 무엇을 hook하고 호출하는지 그대로 보여 줍니다.
+
+### 실행하는 명령
+
+세션이 시작할 때, 메인 대화의 턴이 끝날 때, 요약을 만들기 전에 아래 명령을 실행합니다. 하나에 5초까지 기다리고, git 저장소가 아니거나 실패하면 그냥 넘어갑니다.
+
+| 명령 | 왜 |
+| --- | --- |
+| `git rev-parse --show-toplevel` | 저장소 루트 찾기 |
+| `git ls-files --others --exclude-standard --full-name -z` | 추적하지 않는 파일. 시작할 때 이미 있던 것은 빼고, 새로 생긴 것은 셉니다. |
+| `git stash create` | 시작할 때의 작업 트리를 커밋 객체로만 남깁니다. 어떤 ref도 가리키지 않아 stash 목록에 생기지 않습니다. |
+| `git rev-parse HEAD` | 커밋하지 않은 변경이 없으면 HEAD를 기준으로 |
+| `git diff --name-only --no-renames -z <기준>` | 기준 이후 바뀐 파일 이름. `<기준>`은 위 두 명령이 준 커밋 id입니다. |
+
+### hook
+
+| 이벤트 | 하는 일 |
+| --- | --- |
+| `session.start` | `/sidecar` 명령 등록, 저장된 pane 복원, git 기준 잡기, pane 열기 |
+| `session.end` | pane 저장. `/clear`나 `/resume`이면 pane을 비웁니다. |
+| `ui.close` | 사람이 sidecar pane을 닫으면 닫힘을 기억합니다. `/sidecar`로 열 때까지 자동으로 열지 않습니다. |
+| `command.run` (`/sidecar`) | pane 열기, `close`면 닫기 |
+| `prompt.submit` | 사람이 직접 보낸 프롬프트면 pane의 "보냄" 표시를 지웁니다. |
+| `turn.start` | 메인 대화의 턴마다 로그 행 추가 |
+| `tool.call` (Edit, Write, NotebookEdit) | 성공한 호출이 바꾼 파일 경로를 기록 |
+| `turn.complete` | 답에서 선택지 찾기, 로그 한 줄, 바뀐 파일 찾기, 3턴마다 요약 |
+| `ui.render` (`Pane`) | sidecar pane 그리기 |
+
+어느 hook도 이벤트나 다른 코드의 호출을 막거나 바꾸지 않고 그대로 넘깁니다. `command.run`과 `ui.render`는 sidecar 자신의 명령과 pane에만 답합니다.
 
 ## 추정인 것
 
@@ -126,7 +154,7 @@ Q 블록과 번호 질문은 질문마다 고르거나, `✎ 직접`을 눌러 �
 claude --plugin-dir .            # 불러오기, 고치면 다시 불러옵니다
 claude plugin test .
 claude plugin validate .
-npx -p typescript tsc --noEmit -p .
+npx -p typescript@5.6.3 tsc --noEmit -p .
 ```
 
 규칙과 구조는 [CLAUDE.md](CLAUDE.md)에 있습니다. 버그와 제안은 [GitHub Issues](https://github.com/kaameo-lab/sidecar/issues)로 받습니다.

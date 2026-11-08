@@ -88,13 +88,41 @@ Q blocks and numbered questions are answered one by one, by picking an option or
 
 | What it does | How |
 | --- | --- |
-| Writes one log line per turn | One Haiku call (`$.model.complete`) |
-| Writes the summary and the diagram | One fork of the current session (`$.model.fork`) every 3 turns, or on `↻ 갱신` |
-| Finds the changed files | `git stash create`, `git diff --name-only`, `git ls-files --others`. It does not change the work tree, the index or the stash list. |
-| Saves and restores the pane | Per session, the log (last 30 rows), the summary and the changed files, in a store of sidecar's own inside the Claude Code settings folder. Only the latest 20 sessions are kept. |
-| Sends answers | With `$.prompt.submit`, only when you press a button. |
+| Writes one log line per turn | One Haiku call (`$.model.complete`), sent the turn's first request line and its answer. |
+| Writes the summary and the diagram | One fork of the current session (`$.model.fork`) every 3 turns, or on `↻ 갱신`. The forked conversation is sent a summary prompt with the last answer and the list of changed files. |
+| Finds the changed files | Runs `git`, and nothing else, with `$.process.run`: only the five commands [below](#commands-it-runs). Their output goes only into the pane and the store below. It does not change the work tree, the index or the stash list. |
+| Saves and restores the pane | Per session, the log (last 30 rows), the summary and the changed files, in a store of sidecar's own inside the Claude Code settings folder. Only the latest 20 sessions are kept. The session id (`$.session.id`) is used only as this store's key (`session:<id>`). |
+| Sends answers | With `$.prompt.submit`, only when you press a button. What it sends is what the preview box shows: the options picked or answers typed, and the note added. It never adds the session id, the file list, the log or the summary. |
 
-Model calls go out through the Claude Code account you are using, and no other network requests are made. `claude plugin validate .` shows exactly what it hooks and calls.
+Model calls go out through the Claude Code account you are using, and no other network requests are made. git, too, runs only on this computer. `claude plugin validate .` shows exactly what it hooks and calls.
+
+### Commands it runs
+
+It runs these when a session starts, when a turn of the main conversation ends, and before making a summary. It waits up to 5 seconds for each, and moves on if the folder is not a git repository or a command fails.
+
+| Command | Why |
+| --- | --- |
+| `git rev-parse --show-toplevel` | Finds the repository's root |
+| `git ls-files --others --exclude-standard --full-name -z` | The untracked files. Those there when the session began are left out; new ones count. |
+| `git stash create` | Keeps the work tree as the session found it, as a commit object only. No ref points at it, so nothing appears in the stash list. |
+| `git rev-parse HEAD` | Takes HEAD as the base when nothing is uncommitted |
+| `git diff --name-only --no-renames -z <base>` | The names of the files changed since the base, which is the commit id one of the two commands above gave. |
+
+### Hooks
+
+| Event | What it does |
+| --- | --- |
+| `session.start` | Registers `/sidecar`, restores the saved pane, settles the git base, opens the pane |
+| `session.end` | Saves the pane. On `/clear` or `/resume` it empties the pane. |
+| `ui.close` | When you close the sidecar pane, remembers it, so the pane does not open by itself until `/sidecar` |
+| `command.run` (`/sidecar`) | Opens the pane, or closes it with `close` |
+| `prompt.submit` | When you send a prompt yourself, clears the pane's "sent" mark |
+| `turn.start` | Adds a log row for each turn of the main conversation |
+| `tool.call` (Edit, Write, NotebookEdit) | Records the path a successful call changed |
+| `turn.complete` | Finds options in the answer, writes the log line, finds the changed files, summarises every 3 turns |
+| `ui.render` (`Pane`) | Draws the sidecar pane |
+
+No hook blocks or changes an event or a call made by other code; each passes it on as it came. `command.run` and `ui.render` answer only sidecar's own command and pane.
 
 ## What is a guess
 
@@ -128,7 +156,7 @@ Model calls go out through the Claude Code account you are using, and no other n
 claude --plugin-dir .            # load it; reload after changes
 claude plugin test .
 claude plugin validate .
-npx -p typescript tsc --noEmit -p .
+npx -p typescript@5.6.3 tsc --noEmit -p .
 ```
 
 Rules and structure are in [CLAUDE.md](CLAUDE.md). Bugs and suggestions go to [GitHub Issues](https://github.com/kaameo-lab/sidecar/issues).

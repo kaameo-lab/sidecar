@@ -24,7 +24,7 @@ const toneOf = (node: DiagramNode): Tone | undefined =>
 // Longest path from a node nothing points at; a cycle is cut where it closes.
 const ranksOf = (nodes: DiagramNode[], edges: DiagramEdge[]) => {
   const rank = new Map(nodes.map(node => [node.id, 0]))
-  for (let pass = 0; pass < nodes.length; pass += 1) {
+  for (let round = 0; round < nodes.length; round += 1) {
     let moved = false
     for (const edge of edges) {
       const from = rank.get(edge.from) ?? 0
