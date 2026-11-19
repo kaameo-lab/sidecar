@@ -51,7 +51,7 @@ Update with `claude plugin update sidecar@kaameo-lab`, remove with `claude plugi
 
 | Section | What it shows | When it changes |
 | --- | --- | --- |
-| **선택지** (options) | The options and questions in the last answer, as buttons. Pressing one sends it as if you had typed it. A recommended answer is marked `✓추천`. | Each time Claude finishes an answer |
+| **선택지** (options) | The options and questions not yet answered, as buttons. Pressing one sends it as if you had typed it. A recommended answer is marked `✓추천`. | When an answer asks something new, and when you send or skip |
 | **요약** (summary) | The session's goal, what it is doing now, what was decided, what is left, and the files changed this session | Every 3 turns, or when you press `↻ 갱신` |
 | **작업 그림** (diagram) | Two tabs. **작업 흐름** (flow of work) lists the session's tasks in order, each `[끝]` done, `[진행]` going on or `[대기]` waiting, with what it changed and where it stands (the latest 6). **파일** (files) draws the files it created (green) or changed (yellow) as boxes and lines, each with what changed in it. | When the summary is refreshed |
 | **로그** (log) | One row per turn: what you asked and what Claude did. Press a row to unfold its detail lines. | Each time a turn ends |
@@ -84,6 +84,8 @@ The pane opens when an interactive session starts and when an answer holds optio
 
 Q blocks and numbered questions are answered one by one, by picking an option or by pressing `✎ 직접` and typing in the field that opens right under that question, and then sent together. Text you were typing stays as that question's answer when you move on to another. The bottom field is a **note to add** (덧붙일 말): what you write there goes out under the chosen answers after a blank line, and under the chosen option for simple options too. Below the dotted line after the last question, the text that will be sent is previewed in a bordered box, followed by a status line per question, the note field and the send buttons. When there are recommended answers, "모두 추천대로 보내기" (send all as recommended) works too. An option cut short by the pane's width sends only its key (`b`), so no text you did not see goes out in your name.
 
+A question stays until you send it from sidecar. An answer that asks nothing (a turn a background task's notice started, say) leaves it, and new questions join after it. A number asked again (`Q2'`) takes its old place, and the answer you picked for it goes if it now reads otherwise. "고른 것만 보내기" (send only the picked) takes out only what it sent. You can pick and send while a turn runs; the answer goes in once that turn ends. A question you answered by typing in the prompt stays, so clear it with its own `넘기기` (skip) or `모두 지우기` (clear all) under the list. Of simple options only the latest stay, and under Q blocks they show as buttons that only press.
+
 ## What it touches
 
 | What it does | How |
@@ -91,7 +93,7 @@ Q blocks and numbered questions are answered one by one, by picking an option or
 | Writes one log line per turn | One Haiku call (`$.model.complete`), sent the turn's first request line and its answer. |
 | Writes the summary and the diagram | One fork of the current session (`$.model.fork`) every 3 turns, or on `↻ 갱신`. The forked conversation is sent a summary prompt with the last answer and the list of changed files. |
 | Finds the changed files | Runs `git`, and nothing else, with `$.process.run`: only the five commands [below](#commands-it-runs). Their output goes only into the pane and the store below. It does not change the work tree, the index or the stash list. |
-| Saves and restores the pane | Per session, the log (last 30 rows), the summary and the changed files, in a store of sidecar's own inside the Claude Code settings folder. Only the latest 20 sessions are kept. The session id (`$.session.id`) is used only as this store's key (`session:<id>`). |
+| Saves and restores the pane | Per session, the log (last 30 rows), the summary, the changed files, and the questions not yet answered with the answers picked for them, in a store of sidecar's own inside the Claude Code settings folder. Only the latest 20 sessions are kept. The session id (`$.session.id`) is used only as this store's key (`session:<id>`). |
 | Sends answers | With `$.prompt.submit`, only when you press a button. What it sends is what the preview box shows: the options picked or answers typed, and the note added. It never adds the session id, the file list, the log or the summary. |
 
 Model calls go out through the Claude Code account you are using, and no other network requests are made. git, too, runs only on this computer. `claude plugin validate .` shows exactly what it hooks and calls.
@@ -116,10 +118,9 @@ It runs these when a session starts, when a turn of the main conversation ends, 
 | `session.end` | Saves the pane. On `/clear` or `/resume` it empties the pane. |
 | `ui.close` | When you close the sidecar pane, remembers it, so the pane does not open by itself until `/sidecar` |
 | `command.run` (`/sidecar`) | Opens the pane, or closes it with `close` |
-| `prompt.submit` | When you send a prompt yourself, clears the pane's "sent" mark |
 | `turn.start` | Adds a log row for each turn of the main conversation |
 | `tool.call` (Edit, Write, NotebookEdit) | Records the path a successful call changed |
-| `turn.complete` | Finds options in the answer, writes the log line, finds the changed files, summarises every 3 turns |
+| `turn.complete` | Adds the questions an answer asks after the ones still open, writes the log line, finds the changed files, summarises every 3 turns |
 | `ui.render` (`Pane`) | Draws the sidecar pane |
 
 No hook blocks or changes an event or a call made by other code; each passes it on as it came. `command.run` and `ui.render` answer only sidecar's own command and pane.
@@ -134,6 +135,8 @@ No hook blocks or changes an event or a call made by other code; each passes it 
 **The pane does not open.** Run `/sidecar` after `/reload-plugins`. In a narrow terminal Claude Code may not place a pane it opens by itself; `/sidecar` always opens it.
 
 **Options are not picked up.** Check that the answer fits the [formats table](#formats-taken-as-options). If it fits and still is not picked up, please open an [issue](https://github.com/kaameo-lab/sidecar/issues) with that answer.
+
+**A question I answered is still there.** When you answer by typing in the prompt, sidecar cannot tell which question you answered, so it leaves them all. Clear it with `넘기기` or `모두 지우기`.
 
 **The pane is empty after a resume.** A session started fresh with `claude --resume` is restored. After `/clear` or `/resume` inside Claude Code the pane starts empty. Sessions from before 0.4.0 have nothing saved.
 

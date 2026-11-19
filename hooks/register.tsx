@@ -19,13 +19,11 @@ import { parseChoices, parseNumbered, parseQuestions } from './parse'
 import { cells, fit } from './width'
 
 const EMPTY_VIEW: View = {
-  phase: 'none',
   question: '',
   choices: [],
   items: [],
   answers: {},
   editing: '',
-  sent: '',
   draft: '',
   note: '',
 }
@@ -47,8 +45,8 @@ const EMPTY_FOLDED: Folded = { choices: false, summary: false, diagram: false, l
 
 // Change a tag when its type's fields change: it declines what an earlier
 // version stored, which outlives a reload.
-const view = atom({ plugin: 'sidecar', key: 'view' } as const, EMPTY_VIEW, { shape: 'view-4' })
-const SHAPES = { log: 'log-2', summary: 'summary-3', stats: 'stats-2', folded: 'folded-4' } as const
+const SHAPES = { log: 'log-2', summary: 'summary-3', stats: 'stats-2', folded: 'folded-4', view: 'view-5' } as const
+const view = atom({ plugin: 'sidecar', key: 'view' } as const, EMPTY_VIEW, { shape: SHAPES.view })
 const log = atom({ plugin: 'sidecar', key: 'log' } as const, NO_ENTRIES, { shape: SHAPES.log })
 const summary = atom({ plugin: 'sidecar', key: 'summary' } as const, EMPTY_SUMMARY, { shape: SHAPES.summary })
 const stats = atom({ plugin: 'sidecar', key: 'stats' } as const, EMPTY_STATS, { shape: SHAPES.stats })
@@ -58,7 +56,6 @@ const folded = atom({ plugin: 'sidecar', key: 'folded' } as const, EMPTY_FOLDED,
 const SAVED_SHAPE = Object.values(SHAPES).join(' ')
 const SESSIONS_KEPT = 20
 
-const PLUGIN = 'sidecar'
 const PANE = 'sidecar'
 const TITLE = 'Sidecar'
 const RECOMMEND = '추천대로'
@@ -106,14 +103,45 @@ const recommended = (item: Item, room: number) => {
 
 // One line per answered question; with `fillRest`, the unanswered ones that
 // carry a suggestion take it.
-const compose = (v: View, fillRest: boolean, room: number) =>
-  v.items
-    .flatMap(item => {
-      const given = v.answers[item.id] ?? (fillRest && item.suggestion !== '' ? recommended(item, room) : undefined)
+const replies = (v: View, fillRest: boolean, room: number) =>
+  v.items.flatMap(item => {
+    const given = v.answers[item.id] ?? (fillRest && item.suggestion !== '' ? recommended(item, room) : undefined)
 
-      return given === undefined ? [] : [`${item.id}: ${given}`]
-    })
+    return given === undefined ? [] : [{ id: item.id, line: `${item.id}: ${given}` }]
+  })
+
+const compose = (v: View, fillRest: boolean, room: number) =>
+  replies(v, fillRest, room)
+    .map(reply => reply.line)
     .join('\n')
+
+// The view with the questions `ids` gone, with their answers and any text
+// left in their own field.
+const without = (v: View, ids: string[]): View => {
+  const isEditing = ids.includes(v.editing)
+
+  return {
+    ...v,
+    items: v.items.filter(item => !ids.includes(item.id)),
+    answers: Object.fromEntries(Object.entries(v.answers).filter(([id]) => !ids.includes(id))),
+    editing: isEditing ? '' : v.editing,
+    draft: isEditing ? '' : v.draft,
+  }
+}
+
+// The open questions with an answer's own joined to them. A number asked
+// again takes its old place; if it now reads otherwise, the answer picked for
+// it goes. A number not open yet goes last.
+const gather = (v: View, asked: Item[]): View => {
+  const fresh = new Map(asked.map(item => [item.id, item]))
+  const changed = v.items
+    .filter(item => fresh.has(item.id) && JSON.stringify(fresh.get(item.id)) !== JSON.stringify(item))
+    .map(item => item.id)
+  const held = without(v, changed)
+  const added = [...fresh.values()].filter(item => !v.items.some(old => old.id === item.id))
+
+  return { ...held, items: [...v.items.map(item => fresh.get(item.id) ?? item), ...added] }
+}
 
 const mark = (item: Item, answer: string | undefined) => {
   if (answer === undefined) return '–'
@@ -122,11 +150,18 @@ const mark = (item: Item, answer: string | undefined) => {
   return item.choices.find(choice => answer === said(choice) || answer === choice.key)?.key ?? '✎'
 }
 
-const send = async ($: EngineInterface, text: string) => {
+// Sends `text` as the person's words. What it answers leaves the pane: the
+// questions `answered` names, else the plain options. The open questions'
+// note and field stay through a plain option's press.
+const send = async ($: EngineInterface, text: string, answered?: string[]) => {
   const trimmed = text.trim()
   if (trimmed === '') return
 
-  await update($, view, (v): View => ({ ...v, phase: 'sent', sent: trimmed, draft: '', note: '', editing: '' }))
+  await update($, view, (v): View => {
+    if (answered === undefined) return { ...v, question: '', choices: [], note: v.items.length > 0 ? v.note : '' }
+
+    return { ...without(v, answered), editing: '', draft: '', note: '' }
+  })
   await $.prompt.submit({ text: trimmed, asUser: true })
 }
 
@@ -293,6 +328,7 @@ const save = async ($: EngineInterface, ending?: string) => {
     summary: await read($, summary),
     stats: await read($, stats),
     folded: await read($, folded),
+    view: await read($, view),
   }
   await $.store.set(savedKey(id), saved)
 
@@ -324,6 +360,7 @@ const restore = async ($: EngineInterface) => {
   if (holds('summary')) await update($, summary, (): Summary => ({ ...saved.summary, isBusy: false }))
   if (holds('stats')) await update($, stats, (): Stats => ({ ...saved.stats, base: '', untracked: [] }))
   if (holds('folded')) await update($, folded, (): Folded => saved.folded)
+  if (holds('view')) await update($, view, (): View => saved.view)
 }
 
 // Empties the pane for another conversation in this process; the folds are
@@ -397,13 +434,6 @@ export const register: Register = on => {
     return { text: 'Sidecar pane을 열었어요.' }
   })
 
-  on('prompt.submit', async ($, e, next) => {
-    const isOurs = e.origin?.kind === 'plugin' && e.origin.name === PLUGIN
-    if (!isOurs) await update($, view, v => ({ ...v, sent: '' }))
-
-    return next(e)
-  })
-
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
       const notice = noticeLine(e.text)
@@ -416,7 +446,6 @@ export const register: Register = on => {
         detail: '',
         status: 'working',
       }
-      await update($, view, (v): View => ({ ...v, phase: 'working' }))
       await update($, log, (entries): Entry[] => [...entries, entry].slice(-LOG_KEPT))
     }
 
@@ -447,15 +476,12 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     if (e.agentId !== undefined) return next(e)
 
+    // What the answer asks joins what is still open; an answer that asks
+    // nothing leaves it, since only the pane's own send answers it.
     const items = e.isAborted ? null : (parseQuestions(e.answer) ?? parseNumbered(e.answer))
     const parsed = e.isAborted || items ? null : parseChoices(e.answer)
-    const fresh = { answers: {}, editing: '', sent: '', draft: '', note: '' }
-    await update($, view, (v): View => {
-      if (items) return { ...v, ...fresh, phase: 'options', question: '', choices: [], items }
-      if (parsed) return { ...v, ...fresh, phase: 'options', ...parsed, items: [] }
-
-      return { ...v, phase: 'none', question: '', choices: [], items: [] }
-    })
+    if (items) await update($, view, (v): View => gather(v, items))
+    if (parsed) await update($, view, (v): View => ({ ...v, ...parsed }))
     if ((items || parsed) && !(await read($, folded)).isClosed) void $.ui.open({ id: PANE, title: TITLE })
 
     const isStopped = e.isAborted || e.answer.trim() === ''
@@ -509,7 +535,7 @@ export const register: Register = on => {
       )
     }
 
-    const hasChoices = v.phase === 'options' && (v.items.length > 0 || v.choices.length > 0)
+    const hasChoices = v.items.length > 0 || v.choices.length > 0
 
     const questions = () => {
       // What a send would take: the open question's unsaved text counts.
@@ -519,6 +545,13 @@ export const register: Register = on => {
       const isComplete = answered === v.items.length
       // What 보내기 and Enter in the bottom field send, drawn before they do.
       const preview = withNote(compose(now, false, columns), v.note)
+      // Sends the answers given, with `fillRest` the suggestions too; the
+      // questions they answer leave the pane.
+      const answerWith = (fillRest: boolean, note: string) => {
+        const out = replies(now, fillRest, columns)
+
+        return send($, withNote(out.map(reply => reply.line).join('\n'), note), out.map(reply => reply.id))
+      }
 
       return (
         <Box flexDirection="column">
@@ -572,6 +605,12 @@ export const register: Register = on => {
                       await focusOn($, `answer-${item.id}`)
                     }}
                   />
+                  <Button
+                    key={`skip-${item.id}`}
+                    label="넘기기"
+                    dimColor
+                    onPress={() => update($, view, (cur): View => without(cur, [item.id]))}
+                  />
                 </Box>
                 {Input && v.editing === item.id && (
                   <Input
@@ -620,7 +659,7 @@ export const register: Register = on => {
               rows={rowsFor(v.note, fieldRoom('보내기'))}
               value={v.note}
               onInput={value => update($, view, cur => ({ ...cur, note: value }))}
-              onSubmit={value => send($, withNote(compose(now, false, columns), value))}
+              onSubmit={value => answerWith(false, value)}
             />
           )}
           <Box flexDirection="row">
@@ -629,7 +668,7 @@ export const register: Register = on => {
                 key="send-all"
                 variant="primary"
                 label={answered === 0 ? '모두 추천대로 보내기' : '나머지는 추천대로 보내기'}
-                onPress={() => send($, withNote(compose(now, true, columns), v.note))}
+                onPress={() => answerWith(true, v.note)}
               />
             )}
             {answered > 0 && (
@@ -637,10 +676,11 @@ export const register: Register = on => {
                 key="send-picked"
                 variant="primary"
                 label={isComplete ? '보내기' : '고른 것만 보내기'}
-                onPress={() => send($, withNote(compose(now, false, columns), v.note))}
+                onPress={() => answerWith(false, v.note)}
               />
             )}
           </Box>
+          <Button key="clear-all" label="모두 지우기" dimColor onPress={() => update($, view, (): View => EMPTY_VIEW)} />
         </Box>
       )
     }
@@ -649,10 +689,13 @@ export const register: Register = on => {
     // terminal, four cells over its label.
     const choiceRoom = body - 4 - (cells('✎') + 4)
 
+    // Under open questions the bottom field is theirs, so plain options only
+    // press there: no ✎, no field of their own, no note under the press.
+    const isAlone = v.items.length === 0
     // What a plain option sends: its words when they showed whole, else its key.
-    const wordsOf = (choice: Choice) => (isWhole(said(choice), choiceRoom) ? said(choice) : choice.key)
+    const wordsOf = (choice: Choice) => (isWhole(said(choice), isAlone ? choiceRoom : body - 4) ? said(choice) : choice.key)
     // A note still holding only an ✎'s "b, " adds nothing to a press.
-    const added = v.choices.some(choice => v.note.trim() === `${wordsOf(choice)},`) ? '' : v.note
+    const added = !isAlone || v.choices.some(choice => v.note.trim() === `${wordsOf(choice)},`) ? '' : v.note
 
     const letters = () => (
       <Box flexDirection="column">
@@ -669,22 +712,30 @@ export const register: Register = on => {
               <Button
                 key={`choice-${choice.key}`}
                 hotkey={choice.key}
-                label={fit(said(choice), choiceRoom)}
+                label={fit(said(choice), isAlone ? choiceRoom : body - 4)}
                 onPress={() => send($, withNote(words, added))}
               />
-              <Button
-                key={`edit-${choice.key}`}
-                label="✎"
-                dimColor
-                onPress={async () => {
-                  await update($, view, cur => ({ ...cur, note: `${words}, ` }))
-                  await focusOn($, 'free')
-                }}
-              />
+              {isAlone && (
+                <Button
+                  key={`edit-${choice.key}`}
+                  label="✎"
+                  dimColor
+                  onPress={async () => {
+                    await update($, view, cur => ({ ...cur, note: `${words}, ` }))
+                    await focusOn($, 'free')
+                  }}
+                />
+              )}
             </Box>
           )
         })}
-        {Input && (
+        <Button
+          key="skip-plain"
+          label="넘기기"
+          dimColor
+          onPress={() => update($, view, (cur): View => ({ ...cur, question: '', choices: [], note: isAlone ? '' : cur.note }))}
+        />
+        {isAlone && Input && (
           <Input
             key="free"
             placeholder="직접 입력"
@@ -708,7 +759,8 @@ export const register: Register = on => {
         {hasChoices && (
           <Box flexDirection="column">
             {heading('choices', '선택지')}
-            {!f.choices && (v.items.length > 0 ? questions() : letters())}
+            {!f.choices && v.items.length > 0 && questions()}
+            {!f.choices && v.choices.length > 0 && letters()}
             {rule}
           </Box>
         )}

@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import type { Engine } from 'claude-code/testing'
+import type { Engine, Mounted } from 'claude-code/testing'
 
 import { parseChoices, parseNumbered, parseQuestions } from '../hooks/parse'
 import { cells, fit } from '../hooks/width'
@@ -378,7 +378,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     await ui.press({ key: 'choice-b' })
     expect(sent).toEqual(['b) JWT'])
-    // Sent: the options step aside until the next answer.
+    // Sent: the options it answered leave the pane.
     expect(await ui.find({ key: 'choice-b' })).toBeUndefined()
     await ui.unmount()
   })
@@ -758,6 +758,121 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(sent).toEqual(['Q1: b'])
     await ui.unmount()
   })
+
+  // The marks row under the questions names every open one in order.
+  const marks = async (ui: Mounted<typeof surface, 'Pane'>) =>
+    (await ui.find({ type: 'Text', text: /^Q\d+ [–✓✎a-z](  |$)/ }))?.text
+
+  test(`a question left unanswered stays through later answers, and a new round joins it (${surface})`, async ($, on) => {
+    host(on)
+    await answer($, ASKED)
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'ok-Q1' })
+
+    // A background notice's turn, then words typed past the pane: neither answers from it.
+    await turn($, 't2', '<task-notification>\n<summary>조사 끝</summary>\n</task-notification>', '조사가 끝났습니다. 답을 기다릴게요.')
+    await turn($, 't3', 'Q2: 네', '알겠습니다.')
+    expect(await marks(ui)).toBe('Q1 ✓  Q2 –  Q3 –')
+
+    await turn($, 't4', '이어서', '❓ Q4 - **배포 시점**: 오늘 배포할까요?\n\n➡️ 예.')
+    expect(await marks(ui)).toBe('Q1 ✓  Q2 –  Q3 –  Q4 –')
+    await ui.unmount()
+  })
+
+  test(`a question asked again takes its place, its answer kept only while it reads the same (${surface})`, async ($, on) => {
+    host(on)
+    await answer($, ASKED)
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'ok-Q1' })
+    await ui.press({ key: 'ok-Q2' })
+
+    const again = [
+      '❓ Q1 - **티켓과 브랜치**: 이 문서는 #359 범위가 아닙니다. 새 브랜치로 옮길까요?',
+      '',
+      '➡️ 예. 새 이슈 하나로 묶습니다.',
+      '',
+      "❓ Q2' - **문서의 지위**: 제안 항목은 아예 뺄까요?",
+      '',
+      '➡️ 예. 합의된 것만 둡니다.',
+    ].join('\n')
+    await turn($, 't2', '다시', again)
+    expect(await marks(ui)).toBe('Q1 ✓  Q2 –  Q3 –')
+    expect(await ui.find({ type: 'Text', text: /➡ 예\. 합의된 것만/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test(`a send takes out only the questions it answered (${surface})`, async ($, on) => {
+    const sent = host(on)
+    await answer($, ASKED)
+    const ui = await $.ui.mount({ ...PANE, surface })
+
+    await ui.press({ key: 'ok-Q1' })
+    await ui.press({ key: 'send-picked' })
+    expect(sent).toEqual(['Q1: 추천대로 (예. 새 이슈 하나로 묶습니다.)'])
+    expect(await ui.find({ key: 'ok-Q1' })).toBeUndefined()
+    expect(await marks(ui)).toBe('Q2 –  Q3 –')
+
+    await ui.press({ key: 'pick-Q3-b' })
+    expect((await ui.find({ key: 'send-all' }))?.props.label).toBe('나머지는 추천대로 보내기')
+    await ui.press({ key: 'send-all' })
+    expect(sent[1]).toBe('Q2: 추천대로\nQ3: b) 로컬에만 둔다')
+    expect(await ui.find({ key: 'fold-choices' })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test(`넘기기 takes out one question, 모두 지우기 every option (${surface})`, async ($, on) => {
+    const sent = host(on)
+    await answer($, ASKED)
+    const ui = await $.ui.mount({ ...PANE, surface })
+
+    await ui.press({ key: 'pick-Q3-a' })
+    await ui.press({ key: 'skip-Q3' })
+    expect(await marks(ui)).toBe('Q1 –  Q2 –')
+    expect(await ui.find({ key: 'preview' })).toBeUndefined()
+    await ui.press({ key: 'clear-all' })
+    expect(await ui.find({ key: 'fold-choices' })).toBeUndefined()
+
+    await turn($, 't2', '다음', GRILL)
+    await ui.press({ key: 'skip-plain' })
+    expect(await ui.find({ key: 'fold-choices' })).toBeUndefined()
+    expect(sent).toEqual([])
+    await ui.unmount()
+  })
+
+  test(`the open questions stay up while a turn runs (${surface})`, async ($, on) => {
+    const sent = host(on)
+    await answer($, ASKED)
+    const ui = await $.ui.mount({ ...PANE, surface })
+
+    await $.turn.start({ text: '잠깐 다른 것부터', turnId: 't2' })
+    await ui.press({ key: 'pick-Q3-b' })
+    await ui.press({ key: 'send-picked' })
+    expect(sent).toEqual(['Q3: b) 로컬에만 둔다'])
+    expect(await marks(ui)).toBe('Q1 –  Q2 –')
+    await ui.unmount()
+  })
+
+  test(`plain options stay through an answer without any, and sit under open questions (${surface})`, async ($, on) => {
+    const sent = host(on)
+    await answer($, GRILL)
+    await turn($, 't2', '설명해 줘', '세션 쿠키는 서버가 상태를 듭니다.')
+    const ui = await $.ui.mount({ ...PANE, surface })
+    expect(await ui.find({ key: 'choice-b' })).toBeDefined()
+
+    await turn($, 't3', '이어서', ASKED)
+    expect(await ui.find({ key: 'pick-Q3-a' })).toBeDefined()
+    expect(await ui.find({ key: 'choice-b' })).toBeDefined()
+    // The bottom field is the questions' note now, so the plain options only press.
+    expect(await ui.find({ key: 'edit-a' })).toBeUndefined()
+    await ui.input({ key: 'free', text: '덧붙임', kind: 'change' })
+
+    await ui.press({ key: 'choice-b' })
+    expect(sent).toEqual(['b) JWT'])
+    expect(await ui.find({ key: 'choice-b' })).toBeUndefined()
+    expect(await marks(ui)).toBe('Q1 –  Q2 –  Q3 –')
+    expect((await ui.find({ key: 'free' }))?.props.value).toBe('덧붙임')
+    await ui.unmount()
+  })
 }
 
 test('an answer without options leaves only summary and log, on every surface', async ($, on) => {
@@ -1135,7 +1250,23 @@ test('the session saves its pane once more as it ends', async ($, on) => {
   const held = fakeStore(on, 's1')
 
   await $.session.end({ reason: 'prompt_input_exit', sessionId: 's1', resume: { id: 's1' } })
-  expect((held.get('session:s1') as { shape?: string } | undefined)?.shape).toBe('log-2 summary-3 stats-2 folded-4')
+  expect((held.get('session:s1') as { shape?: string } | undefined)?.shape).toBe('log-2 summary-3 stats-2 folded-4 view-5')
+})
+
+test('the open questions and their picks are saved with the session', async ($, on) => {
+  host(on)
+  const held = fakeStore(on, 's1')
+
+  await answer($, ASKED)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'ok-Q1' })
+  await turn($, 't2', '<task-notification>\n<summary>끝</summary>\n</task-notification>', '조사가 끝났습니다.')
+  await drain()
+
+  const saved = held.get('session:s1') as { view?: { items: { id: string }[]; answers: Record<string, string> } } | undefined
+  expect(saved?.view?.items.map(item => item.id)).toEqual(['Q1', 'Q2', 'Q3'])
+  expect(saved?.view?.answers).toEqual({ Q1: '추천대로 (예. 새 이슈 하나로 묶습니다.)' })
+  await ui.unmount()
 })
 
 for (const reason of ['clear', 'resume'] as const) {
@@ -1220,6 +1351,40 @@ test('a restored session measures git from where it now starts', async ($, on) =
   expect(await ui.find({ type: 'Text', text: /^바뀐 파일  login\.ts$/ })).toBeDefined()
   await ui.unmount()
 })
+
+// Two questions still open when the session was saved, the first answered.
+const OPEN_VIEW = {
+  question: '',
+  choices: [],
+  items: [
+    { id: 'Q1', title: '티켓과 브랜치', suggestion: '예.', choices: [], pick: '' },
+    { id: 'Q2', title: '문서의 지위', suggestion: '', choices: [], pick: '' },
+  ],
+  answers: { Q1: '추천대로 (예.)' },
+  editing: '',
+  draft: '',
+  note: '',
+}
+
+for (const [how, shape, isBack] of [
+  ['gets its open questions back', 'log-2 summary-3 stats-2 folded-4 view-5', true],
+  ['saved before questions were kept shows none', 'log-2 summary-3 stats-2 folded-4', false],
+] as const) {
+  test(`a resumed session ${how}`, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    starts(on)
+    fakeStore(on, 's1', new Map([['session:s1', { ...snapshot(shape), view: OPEN_VIEW }]]))
+
+    await $.session.start(START)
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    const row = await ui.find({ type: 'Text', text: /^Q1 ✓/ })
+    if (isBack) expect(row?.text).toBe('Q1 ✓  Q2 –')
+    else expect(await ui.find({ key: 'fold-choices' })).toBeUndefined()
+    // The rest of the pane comes back either way.
+    expect(await ui.find({ type: 'Text', text: '목표  로그인 흐름 정리' })).toBeDefined()
+    await ui.unmount()
+  })
+}
 
 test('a reload keeps the pane it holds over the saved one', async ($, on) => {
   mock.clock(on, { now: NOW })

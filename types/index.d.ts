@@ -5,24 +5,22 @@ export type Choice = { key: string; label: string }
 // the suggestion names ('' when it names none).
 export type Item = { id: string; title: string; suggestion: string; choices: Choice[]; pick: string }
 
-// options: buttons are up; sent: pressed, turn not started yet;
-// working: a turn runs; none: the last answer had no options.
-export type Phase = 'options' | 'sent' | 'working' | 'none'
-
+// What the options section holds: the questions not yet answered from it.
 export type View = {
-  phase: Phase
+  // The latest plain a/b/c options and the question they answer, until one is
+  // pressed or they are skipped.
   question: string
   choices: Choice[]
+  // The Q questions not yet sent or skipped, in the order they were first asked.
   items: Item[]
   // Item id → the answer picked for it.
   answers: Record<string, string>
   // The item whose own field is open, or ''.
   editing: string
-  sent: string
   // What that field holds, not yet its answer.
   draft: string
-  // The bottom field: a note sent under the answers (with plain options, the
-  // reply itself).
+  // The bottom field: a note sent under the answers (with plain options alone,
+  // the reply itself).
   note: string
 }
 
@@ -96,14 +94,15 @@ export type Folded = {
 }
 
 // What the store keeps of one session so a resumed one draws its pane
-// again: every atom but the options, which must not come back stale.
+// again, the questions still open among it.
 export type Saved = {
-  // The four atoms' shape tags when it was saved.
+  // The atoms' shape tags when it was saved.
   shape: string
   log: Entry[]
   summary: Summary
   stats: Stats
   folded: Folded
+  view: View
 }
 
 declare module 'claude-code' {
